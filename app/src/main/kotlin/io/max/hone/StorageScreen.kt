@@ -79,6 +79,7 @@ fun StorageScreen(hone: Hone, pad: PaddingValues, say: (String) -> Unit) {
         if (list != null) {
             sizes = list
             parts = hone.breakdown(list)
+            hone.appsBytes = list.sumOf { it.total }
         }
         disk = hone.disk()
     }
@@ -126,6 +127,10 @@ fun StorageScreen(hone: Hone, pad: PaddingValues, say: (String) -> Unit) {
     }
 
     val list = sizes
+    val vols = remember(disk) { hone.volumes() }
+    val totalAll = vols.sumOf { it.total }.coerceAtLeast(disk.total)
+    val freeAll = vols.sumOf { it.free }.takeIf { vols.isNotEmpty() } ?: disk.free
+    val sdUsed = vols.filter { it.removable }.sumOf { it.total - it.free }
     val legend = parts?.let {
         listOf(
             Triple("Photos", it.images, cs.primary),
@@ -133,42 +138,31 @@ fun StorageScreen(hone: Hone, pad: PaddingValues, say: (String) -> Unit) {
             Triple("Audio", it.audio, cs.secondary),
             Triple("Apps", it.apps, cs.inversePrimary),
             Triple("Other", it.other, cs.outline),
-            Triple("Free", it.free, cs.surfaceContainerHighest),
+            Triple("SD card", sdUsed, cs.secondaryContainer),
+            Triple("Free", freeAll, cs.surfaceContainerHighest),
         )
     }
 
-    LazyColumn(contentPadding = pad + 16.dp, verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        item(key = "hero") {
-            HeroCard(MaterialShapes.Cookie12Sided, MaterialShapes.Flower, Modifier.enter(0)) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                    if (legend == null) {
-                        Box(Modifier.size(210.dp), contentAlignment = Alignment.Center) { LoadingIndicator(Modifier.size(80.dp)) }
-                    } else {
-                        Donut(legend.map { it.second.toFloat() to it.third }, Modifier.size(210.dp)) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                BigValue(bytes(disk.free), MaterialTheme.typography.headlineMediumEmphasized, color = cs.onPrimaryContainer)
-                                Text("internal, free of ${bytes(disk.total)}", style = MaterialTheme.typography.labelLarge, color = cs.onPrimaryContainer)
-                            }
-                        }
-                    }
-                    Spacer(Modifier.height(18.dp))
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        legend?.forEach { (name, size, color) -> Pill("$name ${bytes(size)}", color, cs.surface.copy(alpha = 0.55f)) }
-                    }
+    FilesScreen(hone, pad, say, top = {
+        item(key = "space") { SpaceWidget(hone, vols, disk, Modifier.enter(0)) }
+        item(key = "sections") {
+            val labels = listOf("Clean", "Files", "Apps")
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(ButtonGroupDefaults.ConnectedSpaceBetween)) {
+                labels.forEachIndexed { i, label ->
+                    ToggleButton(
+                        checked = hone.storageSection == i,
+                        onCheckedChange = { hone.storageSection = i },
+                        modifier = Modifier.weight(1f),
+                        shapes = when (i) {
+                            0 -> ButtonGroupDefaults.connectedLeadingButtonShapes()
+                            labels.lastIndex -> ButtonGroupDefaults.connectedTrailingButtonShapes()
+                            else -> ButtonGroupDefaults.connectedMiddleButtonShapes()
+                        },
+                    ) { Text(label) }
                 }
             }
         }
-
-        // One card per volume, so an SD card is never folded into internal storage.
-        hone.volumes().filter { it.removable }.forEach { v ->
-            item(key = "vol:" + v.path) {
-                SectionCard(Modifier.enter(1)) {
-                    val used = 1f - v.free.toFloat() / v.total.coerceAtLeast(1)
-                    CardHeader(Sym.SdCard, v.name, "${bytes(v.free)} free of ${bytes(v.total)}  ·  ${(used * 100).toInt()}% used", MaterialShapes.Square)
-                    GradientBar(used, listOf(cs.tertiary, if (used > 0.9f) cs.error else cs.primary), cs.surfaceContainerHighest)
-                }
-            }
-        }
+        if (hone.storageSection == 0) {
         item(key = "result") {
             AnimatedVisibility(result != null, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
                 SectionCard(container = cs.secondaryContainer) {
@@ -218,6 +212,8 @@ fun StorageScreen(hone: Hone, pad: PaddingValues, say: (String) -> Unit) {
             }
         }
 
+        }
+        if (hone.storageSection == 2) {
         item(key = "toggle") {
             Column(Modifier.enter(3), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 SectionTitle("Biggest apps")
@@ -247,7 +243,8 @@ fun StorageScreen(hone: Hone, pad: PaddingValues, say: (String) -> Unit) {
                 AppSizeRow(hone, app, biggest, busy == null && hone.full, Modifier.animateItem().enter(i + 4)) { clean("one", listOf(app)) }
             }
         }
-    }
+        }
+    })
 }
 
 @Composable

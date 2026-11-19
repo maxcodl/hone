@@ -70,7 +70,7 @@ private sealed interface Page {
 }
 
 @Composable
-fun FilesScreen(hone: Hone, pad: PaddingValues, say: (String) -> Unit) {
+fun FilesScreen(hone: Hone, pad: PaddingValues, say: (String) -> Unit, top: androidx.compose.foundation.lazy.LazyListScope.() -> Unit = {}) {
     var page by remember { mutableStateOf<Page>(Page.Overview) }
     var allowed by remember { mutableStateOf(hone.filesAllowed()) }
     val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
@@ -91,6 +91,8 @@ fun FilesScreen(hone: Hone, pad: PaddingValues, say: (String) -> Unit) {
 
     if (!allowed) {
         LazyColumn(contentPadding = pad + 16.dp, verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            top()
+            item(key = "filesTitle") { SectionTitle("Files") }
             item {
                 SectionCard(Modifier.enter(0)) {
                     CardHeader(Sym.SdCard, "Allow all files access", "Hone needs it to measure folders and move unwanted files to its trash. Turn it on for Hone, then come back.", MaterialShapes.Clover4Leaf)
@@ -105,7 +107,7 @@ fun FilesScreen(hone: Hone, pad: PaddingValues, say: (String) -> Unit) {
     }
 
     when (val p = page) {
-        Page.Overview -> Overview(hone, pad, say, open = { page = it })
+        Page.Overview -> Overview(hone, pad, say, top, open = { page = it })
         is Page.Group -> GroupPage(hone, pad, p.id, say) { page = Page.Overview }
         is Page.Browse -> BrowsePage(hone, pad, p.path, say, open = { page = Page.Browse(it) }, up = {
             page = if (p.path == ROOT || p.path.count { it == '/' } <= 2) Page.Overview else Page.Browse(p.path.substringBeforeLast('/'))
@@ -117,107 +119,105 @@ fun FilesScreen(hone: Hone, pad: PaddingValues, say: (String) -> Unit) {
 const val ROOT = "/storage/emulated/0"
 
 @Composable
-private fun Overview(hone: Hone, pad: PaddingValues, say: (String) -> Unit, open: (Page) -> Unit) {
+private fun Overview(hone: Hone, pad: PaddingValues, say: (String) -> Unit, top: androidx.compose.foundation.lazy.LazyListScope.() -> Unit, open: (Page) -> Unit) {
     val scan = hone.scan
     val cs = MaterialTheme.colorScheme
     val colors = categoryColors()
     val chosen = remember { mutableStateListOf<String>() }
     Box(Modifier.fillMaxSize()) {
     LazyColumn(contentPadding = pad + 16.dp, verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        item(key = "hero") {
-            HeroCard(MaterialShapes.Cookie12Sided, MaterialShapes.Pill, Modifier.enter(0)) {
-                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                    Text("Shared storage", style = MaterialTheme.typography.titleMedium, color = cs.onPrimaryContainer)
-                    if (scan == null) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            LoadingIndicator(Modifier.size(48.dp))
-                            Spacer(Modifier.width(12.dp))
-                            Text("Measuring every folder", color = cs.onPrimaryContainer)
-                        }
-                    } else {
-                        BigValue(bytes(scan.total), MaterialTheme.typography.displaySmallEmphasized, color = cs.onPrimaryContainer)
-                        Text("${scan.files} files", style = MaterialTheme.typography.bodyMedium, color = cs.onPrimaryContainer)
-                        CategoryBar(scan.categories.map { it.bytes.toFloat() to (colors[it.name] ?: cs.outline) })
-                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            scan.categories.filter { it.bytes > 0 }.forEach { Pill("${it.name} ${bytes(it.bytes)}", colors[it.name], cs.surface.copy(alpha = 0.55f)) }
-                        }
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            FilledTonalButton(onClick = { hone.rescan() }, enabled = !hone.scanning, shapes = ButtonDefaults.shapes()) {
-                                Text(if (hone.scanning) "Scanning" else "Scan again")
-                            }
-                            OutlinedButton(onClick = { open(Page.Browse(ROOT)) }, shapes = ButtonDefaults.shapes()) { Text("Browse files") }
-                            hone.volumes().firstOrNull { it.removable }?.let { sd ->
-                                OutlinedButton(onClick = { open(Page.Browse(sd.path)) }, shapes = ButtonDefaults.shapes()) { Text("SD card") }
+        top()
+        if (hone.storageSection == 0) {
+            if (scan != null) {
+                item(key = "cleanTitle") { SectionTitle("Cleanup") }
+                scan.groups.forEachIndexed { i, g ->
+                    item(key = "g:" + g.id) {
+                        RowCard(Modifier.enter(i + 3).clickable(enabled = g.count > 0) { open(Page.Group(g.id)) }) {
+                            Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                                ShapeIcon(groupIcon(g.id), MaterialShapes.Cookie9Sided, size = 44.dp)
+                                Spacer(Modifier.width(14.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text(g.title, style = MaterialTheme.typography.titleMedium)
+                                    Text(
+                                        if (g.count == 0) "Nothing found" else "${g.count} ${if (g.id == "empty" || g.id == "leftovers") "folders" else "files"}",
+                                        style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant,
+                                    )
+                                }
+                                if (g.count > 0) {
+                                    Text(bytes(g.bytes), style = MaterialTheme.typography.titleSmall, color = cs.primary)
+                                    Icon(Sym.ChevronRight, null, tint = cs.onSurfaceVariant)
+                                }
                             }
                         }
                     }
+                }
+                item(key = "trash") { TrashRow(scan.trash) { open(Page.Trash) } }
+            }
+        }
+        if (hone.storageSection == 1) {
+            item(key = "browse") {
+                SectionCard(Modifier.enter(2)) {
+                    CardHeader(Sym.Folder, "Browse", "Sorted by size. Removing goes to Hone's trash.", MaterialShapes.Cookie9Sided)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilledTonalButton(onClick = { open(Page.Browse(ROOT)) }, shapes = ButtonDefaults.shapes()) { Text("Internal storage") }
+                        hone.volumes().firstOrNull { it.removable }?.let { sd ->
+                            FilledTonalButton(onClick = { open(Page.Browse(sd.path)) }, shapes = ButtonDefaults.shapes()) { Text("SD card") }
+                        }
+                    }
+                }
+            }
+            if (scan != null) {
+                item(key = "trash") { TrashRow(scan.trash) { open(Page.Trash) } }
+                item(key = "foldersTitle") { SectionTitle("Biggest folders") }
+                item(key = "folders") {
+                    SectionCard(Modifier.enter(3)) {
+                        val top = scan.folders.firstOrNull()?.bytes?.coerceAtLeast(1) ?: 1
+                        scan.folders.take(12).forEach { f ->
+                            // Rounded, not pill-clipped: a pill corner cut into the first letter and the end dots.
+                            Column(
+                                Modifier.fillMaxWidth().clip(androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+                                    .clickable { open(Page.Browse(f.path)) }.padding(horizontal = 4.dp, vertical = 6.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(f.path.removePrefix("$ROOT/"), Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyLarge)
+                                    Text(bytes(f.bytes), style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant)
+                                }
+                                GradientBar(f.bytes.toFloat() / top, listOf(cs.tertiary, cs.primary), cs.surfaceContainerHighest, height = 6.dp)
+                            }
+                        }
+                    }
+                }
+                item(key = "largestTitle") { SectionTitle("Biggest files") }
+                items(scan.largest.take(15), key = { "l:" + it.path }) { f ->
+                    FileRow(
+                        f.path, f.bytes, f.modified, selected = f.path in chosen,
+                        onToggle = { if (f.path in chosen) chosen.remove(f.path) else chosen.add(f.path) },
+                        modifier = Modifier.animateItem(),
+                    )
                 }
             }
         }
-        if (scan != null) {
-            item(key = "cleanTitle") { SectionTitle("Cleanup") }
-            scan.groups.forEachIndexed { i, g ->
-                item(key = "g:" + g.id) {
-                    RowCard(Modifier.enter(i + 1).clickable(enabled = g.count > 0) { open(Page.Group(g.id)) }) {
-                        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                            ShapeIcon(groupIcon(g.id), MaterialShapes.Cookie9Sided, size = 44.dp)
-                            Spacer(Modifier.width(14.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text(g.title, style = MaterialTheme.typography.titleMedium)
-                                Text(
-                                    if (g.count == 0) "Nothing found" else "${g.count} ${if (g.id == "empty" || g.id == "leftovers") "folders" else "files"}",
-                                    style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant,
-                                )
-                            }
-                            if (g.count > 0) {
-                                Text(bytes(g.bytes), style = MaterialTheme.typography.titleSmall, color = cs.primary)
-                                Icon(Sym.ChevronRight, null, tint = cs.onSurfaceVariant)
-                            }
-                        }
-                    }
-                }
-            }
-            item(key = "trash") {
-                RowCard(Modifier.enter(8).clickable { open(Page.Trash) }) {
-                    Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                        ShapeIcon(Sym.Delete, MaterialShapes.Arch, size = 44.dp)
-                        Spacer(Modifier.width(14.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text("Hone trash", style = MaterialTheme.typography.titleMedium)
-                            Text("Removed files wait here until you empty it", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
-                        }
-                        Text(bytes(scan.trash), style = MaterialTheme.typography.titleSmall, color = cs.primary)
-                        Icon(Sym.ChevronRight, null, tint = cs.onSurfaceVariant)
-                    }
-                }
-            }
-            item(key = "foldersTitle") { SectionTitle("Biggest folders") }
-            item(key = "folders") {
-                SectionCard(Modifier.enter(9)) {
-                    val top = scan.folders.firstOrNull()?.bytes?.coerceAtLeast(1) ?: 1
-                    scan.folders.take(12).forEach { f ->
-                        Column(Modifier.fillMaxWidth().clip(CircleShape).clickable { open(Page.Browse(f.path)) }.padding(vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(f.path.removePrefix("$ROOT/"), Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyLarge)
-                                Text(bytes(f.bytes), style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant)
-                            }
-                            GradientBar(f.bytes.toFloat() / top, listOf(cs.tertiary, cs.primary), cs.surfaceContainerHighest, height = 6.dp)
-                        }
-                    }
-                }
-            }
-            item(key = "largestTitle") { SectionTitle("Biggest files") }
-            items(scan.largest.take(15), key = { "l:" + it.path }) { f ->
-                FileRow(
-                    f.path, f.bytes, f.modified, selected = f.path in chosen,
-                    onToggle = { if (f.path in chosen) chosen.remove(f.path) else chosen.add(f.path) },
-                    modifier = Modifier.animateItem(),
-                )
-            }
-            item { Spacer(Modifier.height(80.dp)) }
-        }
+        item { Spacer(Modifier.height(80.dp)) }
     }
     TrashBar(hone, chosen, scan?.largest?.filter { it.path in chosen }?.sumOf { it.bytes } ?: 0, say, Modifier.align(Alignment.BottomCenter).padding(pad))
+    }
+}
+
+@Composable
+private fun TrashRow(size: Long, onClick: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    RowCard(Modifier.clickable(onClick = onClick)) {
+        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            ShapeIcon(Sym.Delete, MaterialShapes.Arch, size = 44.dp)
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text("Hone trash", style = MaterialTheme.typography.titleMedium)
+                Text("Removed files wait here until you empty it", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+            }
+            Text(bytes(size), style = MaterialTheme.typography.titleSmall, color = cs.primary)
+            Icon(Sym.ChevronRight, null, tint = cs.onSurfaceVariant)
+        }
     }
 }
 
@@ -330,6 +330,7 @@ private fun TrashPage(hone: Hone, pad: PaddingValues, say: (String) -> Unit, bac
     var list by remember { mutableStateOf<TrashList?>(null) }
     val chosen = remember { mutableStateListOf<String>() }
     var askEmpty by remember { mutableStateOf(false) }
+    var emptying by remember { mutableStateOf<Float?>(null) }
     val scope = rememberCoroutineScope()
     suspend fun load() { list = runCatching { hone.call<TrashList>("trash-list") }.getOrElse { TrashList() } }
     LaunchedEffect(Unit) { load() }
@@ -339,8 +340,17 @@ private fun TrashPage(hone: Hone, pad: PaddingValues, say: (String) -> Unit, bac
         "Empty the trash?", "${bytes(list?.bytes ?: 0)} is deleted for good. This cannot be undone.", "Delete for good",
         onConfirm = {
             scope.launch {
-                runCatching { hone.call<Freed>("empty-trash") }
-                    .onSuccess { say("Freed ${bytes(it.freed)}") }.onFailure { say("Could not empty: ${it.message}") }
+                val ids = list?.items?.map { it.id }.orEmpty()
+                var freed = 0L
+                emptying = 0f
+                runCatching {
+                    ids.chunked(20).forEachIndexed { i, batch ->
+                        freed += hone.call<Freed>("trash-purge", *batch.toTypedArray()).freed
+                        emptying = ((i + 1) * 20f / ids.size).coerceAtMost(1f)
+                    }
+                    hone.call<Freed>("empty-trash") // sweeps anything left without a manifest
+                }.onSuccess { say("Freed ${bytes(freed)}") }.onFailure { say("Could not empty: ${it.message}") }
+                emptying = null
                 load()
                 hone.rescan()
             }
@@ -360,6 +370,10 @@ private fun TrashPage(hone: Hone, pad: PaddingValues, say: (String) -> Unit, bac
                     }
                 }
                 Text("Files here still use space. Restore anything you need, then empty the trash to free it.", style = MaterialTheme.typography.bodyMedium)
+                emptying?.let { p ->
+                    Text("Deleting  ·  ${(p * 100).toInt()}%", style = MaterialTheme.typography.titleSmall)
+                    androidx.compose.material3.LinearWavyProgressIndicator(progress = { p }, modifier = Modifier.fillMaxWidth(), color = cs.error)
+                }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilledTonalButton(
                         onClick = {
@@ -371,16 +385,16 @@ private fun TrashPage(hone: Hone, pad: PaddingValues, say: (String) -> Unit, bac
                                 hone.rescan()
                             }
                         },
-                        enabled = chosen.isNotEmpty(), shapes = ButtonDefaults.shapes(),
+                        enabled = chosen.isNotEmpty() && emptying == null, shapes = ButtonDefaults.shapes(),
                     ) {
                         Icon(Sym.Restore, null, Modifier.size(18.dp))
                         Spacer(Modifier.width(6.dp))
                         Text("Restore ${chosen.size}")
                     }
                     Button(
-                        onClick = { askEmpty = true }, enabled = (list?.items?.size ?: 0) > 0, shapes = ButtonDefaults.shapes(),
+                        onClick = { askEmpty = true }, enabled = (list?.items?.size ?: 0) > 0 && emptying == null, shapes = ButtonDefaults.shapes(),
                         colors = ButtonDefaults.buttonColors(containerColor = cs.error, contentColor = cs.onError),
-                    ) { Text("Empty trash") }
+                    ) { Text(if (emptying != null) "Emptying" else "Empty trash") }
                 }
             }
         }

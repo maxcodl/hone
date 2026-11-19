@@ -98,7 +98,6 @@ private val tabs = listOf(
     Tab("Health", Sym.MonitorHeart, Sym.MonitorHeart),
     Tab("Battery", Sym.BatteryCharging, Sym.BatteryCharging),
     Tab("Storage", Sym.Storage, Sym.Storage),
-    Tab("Files", Sym.Folder, Sym.Folder),
     Tab("Speed", Sym.Speed, Sym.Speed),
     Tab("Apps", Sym.Apps, Sym.Apps),
 )
@@ -174,18 +173,20 @@ fun App(hone: Hone) {
                         (slideInHorizontally(spring(dampingRatio = 0.85f, stiffness = 380f)) { it / 5 * dir } + fadeIn(tween(220)) + scaleIn(initialScale = 0.97f)) togetherWith
                             (slideOutHorizontally(tween(180)) { -it / 5 * dir } + fadeOut(tween(150)))
                     Style.Calm -> (slideInHorizontally(tween(260)) { it / 12 * dir } + fadeIn(tween(260))) togetherWith fadeOut(tween(160))
-                    Style.Mono -> fadeIn(tween(140)) togetherWith fadeOut(tween(100))
+                    Style.Mono -> (fadeIn(tween(180, delayMillis = 60)) + scaleIn(tween(220), initialScale = 0.985f)) togetherWith fadeOut(tween(90))
                 }
             },
             label = "tab",
         ) { t ->
+            val opened = remember(t) { System.currentTimeMillis() }
+            CompositionLocalProvider(LocalEnterStart provides opened) {
             when (t) {
                 0 -> HealthScreen(hone, pad, say) { tab = it }
                 1 -> BatteryScreen(hone, pad, say)
                 2 -> StorageScreen(hone, pad, say)
-                3 -> FilesScreen(hone, pad, say)
-                4 -> SpeedScreen(hone, pad, say)
+                3 -> SpeedScreen(hone, pad, say)
                 else -> AppsScreen(hone, pad, say)
+            }
             }
         }
     }

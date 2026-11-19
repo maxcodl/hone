@@ -253,12 +253,18 @@ fun BigValue(text: String, style: TextStyle, modifier: Modifier = Modifier, colo
     }
 }
 
+/** When the current tab appeared; set by the tab host. */
+val LocalEnterStart = androidx.compose.runtime.compositionLocalOf { 0L }
+
 /** Brings cards in: a staggered spring in Expressive, a soft rise in Calm, a quick fade in Mono. */
 @Composable
 fun Modifier.enter(index: Int): Modifier {
     val look = LocalLook.current
-    val a = remember { Animatable(0f) }
+    // Only cards present when the tab opens animate; ones scrolled into view later just appear.
+    val fresh = System.currentTimeMillis() - LocalEnterStart.current < 600
+    val a = remember { Animatable(if (fresh) 0f else 1f) }
     LaunchedEffect(Unit) {
+        if (a.value >= 1f) return@LaunchedEffect
         when (look.style) {
             Style.Expressive -> { delay(index.coerceAtMost(8) * 55L); a.animateTo(1f, spring(dampingRatio = 0.8f, stiffness = 180f)) }
             Style.Calm -> { delay(index.coerceAtMost(8) * 30L); a.animateTo(1f, tween(320, easing = FastOutSlowInEasing)) }
