@@ -152,8 +152,9 @@ fn group(id: &str, title: &str, detail: &str, mut files: Vec<&File>) -> Value {
     })
 }
 
-pub fn scan(installed: &HashSet<String>) -> Value {
-    let root = Path::new(ROOT);
+/// Analyses one volume: internal shared storage, or an SD card's root.
+pub fn scan(root: &str, installed: &HashSet<String>) -> Value {
+    let root = Path::new(root);
     let (files, empty) = walk(root);
     // Cleanup suggestions never reach into Android/: those files belong to apps, and removing them
     // can break an app. Folders of uninstalled apps are the one exception, handled below.
@@ -269,7 +270,7 @@ pub fn scan(installed: &HashSet<String>) -> Value {
     ];
 
     json!({
-        "root": ROOT, "total": total, "files": files.len(),
+        "root": root.to_string_lossy(), "total": total, "files": files.len(),
         "categories": categories, "folders": folders, "largest": largest, "groups": groups,
         "trash": trash_size(),
     })
@@ -435,6 +436,37 @@ pub fn restore(ids: &[String]) -> Value {
         }
     }
     json!({ "restored": restored, "errors": errors })
+}
+
+/// Deletes the given trash items for good; the app calls it in small batches to show progress.
+pub fn purge(ids: &[String]) -> Value {
+    let mut removed = 0u64;
+    let mut freed = 0u64;
+    for (batch, rels) in batches() {
+        let tag = batch.file_name().unwrap().to_string_lossy().to_string();
+        let mut keep = vec![];
+        for rel in rels {
+            if !ids.contains(&format!("{tag}/{rel}")) {
+                keep.push(rel);
+                continue;
+            }
+            let at = batch.join(&rel);
+            let size = if at.is_dir() { dir_size(&at).0 } else { fs::metadata(&at).map(|m| m.len()).unwrap_or(0) };
+            let gone = if at.is_dir() { fs::remove_dir_all(&at) } else { fs::remove_file(&at) };
+            if gone.is_ok() || !at.exists() {
+                removed += 1;
+                freed += size;
+            } else {
+                keep.push(rel);
+            }
+        }
+        if keep.is_empty() {
+            let _ = fs::remove_dir_all(&batch);
+        } else {
+            let _ = fs::write(batch.join(".manifest"), keep.join("\n") + "\n");
+        }
+    }
+    json!({ "removed": removed, "freed": freed })
 }
 
 pub fn empty_trash() -> Value {

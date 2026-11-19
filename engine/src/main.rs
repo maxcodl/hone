@@ -34,16 +34,22 @@ fn main() {
         // The safe list alone, for the app to match against its own package list when there is no shell.
         "tags" => json!({ "packages": debloat::LIST.iter().map(|(p, t, n)| json!({ "pkg": p, "tag": t, "note": n, "state": "unknown" })).collect::<Vec<_>>() }),
         "trim-caches" => trim_caches(),
-        "free-ram" => free_ram(),
+        "free-ram" => free_ram(rest),
         "optimize" => optimize(),
         "optimize-cancel" => output(run("cmd", &["package", "bg-dexopt-job", "--cancel"])),
         "compile" => compile(rest),
-        "scan" => files::scan(&list(&["-u"])),
+        // Internal storage also checks for leftovers of removed apps, which needs the package list.
+        "scan" => match arg(rest, 0) {
+            "" | files::ROOT => files::scan(files::ROOT, &list(&["-u"])),
+            r if r.starts_with("/storage/") && !r.starts_with("/storage/emulated") => files::scan(r, &HashSet::new()),
+            r => json!({ "error": format!("not a volume: {r}") }),
+        },
         "ls" => files::ls(arg(rest, 0)),
         "trash" => files::trash(rest),
         "trash-list" => files::trash_list(),
         "trash-restore" => files::restore(rest),
         "empty-trash" => files::empty_trash(),
+        "trash-purge" => files::purge(rest),
         "maintenance" => output(run("sm", &["idle-maint", "run"])),
         "remove" => change(rest, true),
         "running" => running(),
@@ -457,12 +463,33 @@ fn compile(rest: &[String]) -> Value {
 
 // ---- memory, cache, packages ----
 
-fn free_ram() -> Value {
+/// Closes background apps. With a keep list, closes them one by one and skips those; `am kill` only
+/// touches background processes, so whatever is on screen or playing is safe either way.
+fn free_ram(keep: &[String]) -> Value {
     let before = mem_available();
-    run("am", &["kill-all"]);
+    let closed = if keep.is_empty() {
+        run("am", &["kill-all"]);
+        0
+    } else {
+        let keep: HashSet<&str> = keep.iter().map(String::as_str).collect();
+        let targets: Vec<String> = running_set()
+            .into_iter()
+            .filter(|p| !keep.contains(p.as_str()) && !matches!(p.as_str(), "android" | "system" | "com.android.systemui" | "com.android.phone"))
+            .collect();
+        let count = targets.len();
+        let jobs: Vec<_> = targets
+            .chunks(count.div_ceil(6).max(1))
+            .map(|c| {
+                let c = c.to_vec();
+                thread::spawn(move || c.iter().for_each(|p| { run("cmd", &["activity", "kill", p]); }))
+            })
+            .collect();
+        jobs.into_iter().for_each(|j| { let _ = j.join(); });
+        count
+    };
     thread::sleep(Duration::from_millis(1500));
     let after = mem_available();
-    json!({ "freed": after.saturating_sub(before), "available": after })
+    json!({ "freed": after.saturating_sub(before), "available": after, "apps": closed })
 }
 
 fn trim_caches() -> Value {
@@ -504,6 +531,10 @@ fn packages() -> Value {
 
 /// Package names with a live process (a ":service" suffix belongs to the same app).
 fn running() -> Value {
+    json!({ "packages": running_set().into_iter().collect::<Vec<_>>() })
+}
+
+fn running_set() -> HashSet<String> {
     let mut set = HashSet::new();
     if let Ok(dir) = fs::read_dir("/proc") {
         for e in dir.flatten() {
@@ -518,7 +549,7 @@ fn running() -> Value {
             }
         }
     }
-    json!({ "packages": set.into_iter().collect::<Vec<_>>() })
+    set
 }
 
 fn bg(rest: &[String], mode: &str) -> Value {
