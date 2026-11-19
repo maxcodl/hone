@@ -2,6 +2,7 @@
 //! commands. Every command prints one JSON object on stdout.
 
 mod debloat;
+mod files;
 
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -26,9 +27,22 @@ fn main() {
         "optimize" => optimize(),
         "optimize-cancel" => output(run("cmd", &["package", "bg-dexopt-job", "--cancel"])),
         "compile" => compile(rest),
+        "scan" => files::scan(&list(&["-u"])),
+        "ls" => files::ls(arg(rest, 0)),
+        "trash" => files::trash(rest),
+        "trash-list" => files::trash_list(),
+        "trash-restore" => files::restore(rest),
+        "empty-trash" => files::empty_trash(),
         "maintenance" => output(run("sm", &["idle-maint", "run"])),
         "remove" => change(rest, true),
+        "running" => running(),
+        "uninstall" => app_action(rest, &["uninstall"], "Success"),
+        "disable" => app_action(rest, &["disable-user", "--user", "0"], "disabled"),
+        "enable" => app_action(rest, &["enable", "--user", "0"], "enabled"),
+        "archive" => app_action(rest, &["archive"], "Success"),
+        "unarchive" => app_action(rest, &["request-unarchive"], ""),
         "restore" => change(rest, false),
+        "grant-files" => output(run("appops", &["set", arg(rest, 0), "MANAGE_EXTERNAL_STORAGE", "allow"])),
         "grant-usage" => output(run("appops", &["set", arg(rest, 0), "GET_USAGE_STATS", "allow"])),
         "reboot" => output(run("svc", &["power", "reboot"])),
         _ => json!({ "error": format!("unknown command '{cmd}'") }),
@@ -438,6 +452,37 @@ fn packages() -> Value {
         .collect();
     v.sort_by(|a, b| a["pkg"].as_str().cmp(&b["pkg"].as_str()));
     json!({ "packages": v })
+}
+
+/// Package names with a live process (a ":service" suffix belongs to the same app).
+fn running() -> Value {
+    let mut set = HashSet::new();
+    if let Ok(dir) = fs::read_dir("/proc") {
+        for e in dir.flatten() {
+            if !e.file_name().to_string_lossy().chars().all(|c| c.is_ascii_digit()) {
+                continue;
+            }
+            let raw = fs::read(e.path().join("cmdline")).unwrap_or_default();
+            let first = String::from_utf8_lossy(raw.split(|b| *b == 0).next().unwrap_or(&[])).to_string();
+            let name = first.split(':').next().unwrap_or("");
+            if name.contains('.') && !name.starts_with('/') {
+                set.insert(name.to_string());
+            }
+        }
+    }
+    json!({ "packages": set.into_iter().collect::<Vec<_>>() })
+}
+
+/// One package-manager action on an app the user installed. Hone itself is never a target.
+fn app_action(rest: &[String], cmd: &[&str], ok_word: &str) -> Value {
+    let pkg = arg(rest, 0);
+    if pkg.is_empty() || pkg == "io.max.hone" || !pkg.contains('.') {
+        return json!({ "ok": false, "output": "not allowed" });
+    }
+    let args = [&["package"][..], cmd, &[pkg]].concat();
+    let out = run("cmd", &args);
+    let ok = !out.contains("Exception") && !out.contains("Error") && !out.contains("Failure") && (ok_word.is_empty() || out.contains(ok_word));
+    json!({ "ok": ok, "output": out })
 }
 
 fn change(rest: &[String], remove: bool) -> Value {

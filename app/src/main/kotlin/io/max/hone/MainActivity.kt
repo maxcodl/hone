@@ -30,9 +30,18 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Apps
+import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.outlined.MonitorHeart
 import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material.icons.outlined.Storage
@@ -102,6 +111,7 @@ private data class Tab(val title: String, val icon: ImageVector, val outline: Im
 private val tabs = listOf(
     Tab("Health", Icons.Rounded.MonitorHeart, Icons.Outlined.MonitorHeart),
     Tab("Storage", Icons.Rounded.Storage, Icons.Outlined.Storage),
+    Tab("Files", Icons.Rounded.Folder, Icons.Outlined.Folder),
     Tab("Speed", Icons.Rounded.Speed, Icons.Outlined.Speed),
     Tab("Apps", Icons.Rounded.Apps, Icons.Outlined.Apps),
 )
@@ -127,10 +137,13 @@ fun App(hone: Hone) {
     if (showLook) LookSheet(hone) { showLook = false }
 
     Scaffold(
-        modifier = Modifier.nestedScroll(scroll.nestedScrollConnection),
+        modifier = if (look.mono) Modifier else Modifier.nestedScroll(scroll.nestedScrollConnection),
         containerColor = cs.surface,
         topBar = {
-            LargeFlexibleTopAppBar(
+            if (look.mono) DotHeader(tabs[tab].title, if (hone.full) hone.deviceName else "${hone.deviceName}  ·  without Shizuku") {
+                if (!hone.full) IconButton(onClick = { hone.connect() }) { Icon(Icons.Rounded.Bolt, "Connect Shizuku") }
+                IconButton(onClick = { showLook = true }) { Icon(Icons.Rounded.Palette, "Look") }
+            } else LargeFlexibleTopAppBar(
                 title = { Text(if (look.mono) tabs[tab].title.uppercase() else tabs[tab].title) },
                 subtitle = { Text(if (hone.full) hone.deviceName else "${hone.deviceName}  ·  without Shizuku", maxLines = 1) },
                 actions = {
@@ -144,7 +157,7 @@ fun App(hone: Hone) {
             )
         },
         bottomBar = {
-            ShortNavigationBar(containerColor = if (look.amoled || look.mono) cs.surface else ShortNavigationBarDefaults.containerColor) {
+            if (look.mono) DotNav(tab) { tab = it } else ShortNavigationBar(containerColor = if (look.amoled || look.mono) cs.surface else ShortNavigationBarDefaults.containerColor) {
                 tabs.forEachIndexed { i, t ->
                     ShortNavigationBarItem(
                         selected = tab == i,
@@ -174,8 +187,56 @@ fun App(hone: Hone) {
             when (t) {
                 0 -> HealthScreen(hone, pad, say) { tab = it }
                 1 -> StorageScreen(hone, pad, say)
-                2 -> SpeedScreen(hone, pad, say)
+                2 -> FilesScreen(hone, pad, say)
+                3 -> SpeedScreen(hone, pad, say)
                 else -> AppsScreen(hone, pad, say)
+            }
+        }
+    }
+}
+
+/** Dot-matrix title over a small mono line, actions on the right. */
+@Composable
+private fun DotHeader(title: String, sub: String, actions: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    Column(Modifier.fillMaxWidth().background(cs.surface).statusBarsPadding().padding(start = 20.dp, end = 8.dp, top = 8.dp, bottom = 8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.weight(1f)) { DotText(title, 26.sp, cs.onSurface) }
+            actions()
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(
+            sub.uppercase(), maxLines = 1,
+            style = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace, letterSpacing = 1.5.sp),
+            color = cs.onSurfaceVariant,
+        )
+    }
+}
+
+/** Bottom bar: a hairline on top, outline icons, mono labels, a red dot over the open tab. */
+@Composable
+private fun DotNav(selected: Int, onSelect: (Int) -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    Column(Modifier.fillMaxWidth().background(cs.surface).navigationBarsPadding()) {
+        HorizontalDivider(color = cs.outlineVariant)
+        Row(Modifier.fillMaxWidth().height(68.dp)) {
+            tabs.forEachIndexed { i, t ->
+                val on = i == selected
+                Column(
+                    Modifier.weight(1f).fillMaxHeight().clickable { onSelect(i) },
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    Box(Modifier.size(5.dp).clip(CircleShape).background(if (on) cs.error else Color.Transparent))
+                    Spacer(Modifier.height(5.dp))
+                    Icon(if (on) t.icon else t.outline, null, Modifier.size(22.dp), tint = if (on) cs.onSurface else cs.onSurfaceVariant)
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        t.title.uppercase(),
+                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace, letterSpacing = 1.sp),
+                        color = if (on) cs.onSurface else cs.onSurfaceVariant,
+                    )
+                }
             }
         }
     }

@@ -90,6 +90,7 @@ fun Ring(value: Float, modifier: Modifier, stroke: Dp = 18.dp, colors: List<Colo
         shown.animateTo(value.coerceIn(0f, 1f), if (look.playful) spring(dampingRatio = 0.7f, stiffness = 60f) else tween(700, easing = FastOutSlowInEasing))
     }
     val lit = MaterialTheme.colorScheme.onSurface
+    val warn = MaterialTheme.colorScheme.error
     Box(modifier, contentAlignment = Alignment.Center) {
         Canvas(Modifier.matchParentSize()) {
             val w = stroke.toPx()
@@ -100,7 +101,7 @@ fun Ring(value: Float, modifier: Modifier, stroke: Dp = 18.dp, colors: List<Colo
                 for (i in 0 until dots) {
                     val a = Math.toRadians(-90.0 + i * 360.0 / dots)
                     val on = i < (shown.value * dots).toInt()
-                    drawCircle(if (on) colors.first() else lit.copy(alpha = 0.12f), dot, Offset(center.x + r * cos(a).toFloat(), center.y + r * sin(a).toFloat()))
+                    drawCircle(if (on) (if (colors.first() == warn) warn else lit) else lit.copy(alpha = 0.12f), dot, Offset(center.x + r * cos(a).toFloat(), center.y + r * sin(a).toFloat()))
                 }
                 return@Canvas
             }
@@ -214,8 +215,18 @@ fun Equalizer(values: List<Float>, modifier: Modifier, color: Color, track: Colo
 fun GradientBar(value: Float, colors: List<Color>, track: Color, modifier: Modifier = Modifier, height: Dp = 12.dp) {
     val look = LocalLook.current
     val v by animateFloatAsState(value.coerceIn(0f, 1f), spring(dampingRatio = 0.75f, stiffness = 120f), label = "bar")
-    val h = if (look.mono) 4.dp else height
-    Box(modifier.fillMaxWidth().height(h).clip(CircleShape).background(track)) {
+    if (look.mono) {
+        val cs = MaterialTheme.colorScheme
+        val on = if (colors.last() == cs.error) cs.error else cs.onSurface
+        Canvas(modifier.fillMaxWidth().height(6.dp)) {
+            val n = (size.width / 9.dp.toPx()).toInt().coerceAtLeast(4)
+            val step = size.width / n
+            val lit = (v * n + 0.5f).toInt()
+            for (i in 0 until n) drawCircle(if (i < lit) on else on.copy(alpha = 0.12f), size.height / 2, Offset(step * i + step / 2, size.height / 2))
+        }
+        return
+    }
+    Box(modifier.fillMaxWidth().height(height).clip(CircleShape).background(track)) {
         Box(
             Modifier.fillMaxWidth(v).fillMaxHeight().clip(CircleShape)
                 .background(if (look.playful) Brush.horizontalGradient(colors) else Brush.linearGradient(listOf(colors.last(), colors.last()))),

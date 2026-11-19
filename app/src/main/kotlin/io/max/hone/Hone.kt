@@ -70,6 +70,33 @@ import kotlin.coroutines.resume
 /** What fills the phone, for the storage ring. */
 data class Breakdown(val images: Long, val video: Long, val audio: Long, val apps: Long, val other: Long, val free: Long)
 
+@Serializable data class FileItem(val path: String, val bytes: Long = 0, val modified: Long = 0)
+@Serializable data class Category(val name: String, val bytes: Long = 0, val count: Long = 0)
+@Serializable data class Folder(val path: String, val bytes: Long = 0, val files: Long = 0)
+@Serializable data class CleanGroup(val id: String, val title: String, val detail: String, val bytes: Long = 0, val count: Int = 0, val files: List<FileItem> = emptyList())
+@Serializable data class Scan(
+    val total: Long = 0,
+    val files: Long = 0,
+    val categories: List<Category> = emptyList(),
+    val folders: List<Folder> = emptyList(),
+    val largest: List<FileItem> = emptyList(),
+    val groups: List<CleanGroup> = emptyList(),
+    val trash: Long = 0,
+)
+@Serializable data class Entry(val path: String, val name: String, val dir: Boolean, val bytes: Long = 0, val items: Long = 0, val modified: Long = 0, val locked: Boolean = false)
+@Serializable data class Listing(val path: String = "", val entries: List<Entry> = emptyList(), val error: String? = null)
+@Serializable data class TrashError(val path: String = "", val error: String = "")
+@Serializable data class Trashed(val moved: Int = 0, val bytes: Long = 0, val gone: Int = 0, val errors: List<TrashError> = emptyList()) {
+    fun summary() = buildString {
+        append("Moved $moved to trash")
+        if (gone > 0) append(", $gone already gone")
+        if (errors.isNotEmpty()) append(", ${errors.size} skipped: ${errors.first().error}")
+    }
+}
+@Serializable data class TrashItem(val id: String, val original: String, val bytes: Long = 0, val trashed: Long = 0)
+@Serializable data class TrashList(val items: List<TrashItem> = emptyList(), val bytes: Long = 0)
+@Serializable data class Restored(val restored: Int = 0)
+
 data class AppSize(val pkg: String, val label: String, val system: Boolean, val app: Long, val data: Long, val cache: Long) {
     val total get() = app + data
 }
@@ -292,6 +319,69 @@ class Hone(private val context: Context) {
                 }
                 t.copy(state = state)
             }
+        }
+    }
+
+    // ---- files ----
+
+    fun filesAllowed(): Boolean = full || canReadFiles()
+
+    fun canReadFiles(): Boolean = android.os.Build.VERSION.SDK_INT >= 30 && Environment.isExternalStorageManager()
+
+    /** With Shizuku the engine grants Hone all-files access, which previews need; harmless when already on. */
+    suspend fun ensureFileAccess() {
+        if (full && !canReadFiles()) runCatching { raw("grant-files", context.packageName) }
+    }
+
+    fun openFilesAccess() {
+        val intent = if (android.os.Build.VERSION.SDK_INT >= 30) {
+            Intent(android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, android.net.Uri.parse("package:${context.packageName}"))
+        } else {
+            Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:${context.packageName}"))
+        }
+        context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
+
+    /** Last storage scan, kept here so it survives switching tabs. */
+    var scan by mutableStateOf<Scan?>(null)
+        private set
+    var scanning by mutableStateOf(false)
+        private set
+
+    /**
+     * Moves [paths] to the trash and takes them off every list at once, before the next scan
+     * catches up, so nothing stale can be picked again.
+     */
+    suspend fun trash(paths: List<String>, progress: (Float) -> Unit = {}): Trashed {
+        // Small batches so the progress bar moves and one slow folder does not hold up the rest.
+        var r = Trashed()
+        paths.chunked(8).forEachIndexed { i, batch ->
+            val part = call<Trashed>("trash", *batch.toTypedArray())
+            r = Trashed(r.moved + part.moved, r.bytes + part.bytes, r.gone + part.gone, r.errors + part.errors)
+            progress((i + 1) * 8f / paths.size)
+        }
+        val done = paths.toSet()
+        scan = scan?.let { s ->
+            s.copy(
+                groups = s.groups.map { g ->
+                    val left = g.files.filterNot { it.path in done }
+                    val removed = g.files - left.toSet()
+                    g.copy(files = left, count = (g.count - removed.size).coerceAtLeast(0), bytes = (g.bytes - removed.sumOf { it.bytes }).coerceAtLeast(0))
+                },
+                largest = s.largest.filterNot { it.path in done },
+                trash = s.trash + r.bytes,
+            )
+        }
+        rescan()
+        return r
+    }
+
+    fun rescan() {
+        if (scanning) return
+        scanning = true
+        scope.launch {
+            runCatching { call<Scan>("scan") }.onSuccess { scan = it }.onFailure { Log.w(TAG, "scan", it) }
+            scanning = false
         }
     }
 

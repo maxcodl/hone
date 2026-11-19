@@ -4,6 +4,10 @@
 
     <!-- Labels and icons of every app for the storage and debloat lists. -->
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" tools:ignore="QueryAllPackagesPermission" />
+    <!-- Files tab without Shizuku: read folders and move unwanted files to Hone's trash. -->
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" tools:ignore="ScopedStorage" />
+    <!-- Uninstall without Shizuku, through Android's own confirm screen. -->
+    <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
     <!-- Free memory without Shizuku: ask Android to close background apps. -->
     <uses-permission android:name="android.permission.KILL_BACKGROUND_PROCESSES" />
     <!-- Per-app sizes; the engine grants the app op through Shizuku. -->
@@ -24,6 +28,14 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <!-- Hands shared APKs to other apps. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/share_paths" />
+        </provider>
         <provider
             android:name="rikka.shizuku.ShizukuProvider"
             android:authorities="${applicationId}.shizuku"

@@ -212,11 +212,11 @@ fun HealthScreen(hone: Hone, pad: PaddingValues, say: (String) -> Unit, goTo: (I
         item(key = "heat") {
             SectionCard(Modifier.enter(5)) {
                 CardHeader(Icons.Rounded.Thermostat, "Heat", thermalText(h.thermalStatus), MaterialShapes.Sunny)
-                h.temps.sortedByDescending { it.celsius }.forEach { t ->
+                mergeChips(h.temps).sortedByDescending { it.celsius }.forEach { t ->
                     val limit = if (t.name == "BATTERY" || t.name == "SKIN") 45.0 else 75.0
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Row {
-                            Text(sensorName(t.name), Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                            RowLabel(sensorName(t.name), Modifier.weight(1f))
                             Text("${fmt(t.celsius)}°", style = MaterialTheme.typography.titleSmall)
                         }
                         GradientBar(
@@ -244,14 +244,19 @@ fun HealthScreen(hone: Hone, pad: PaddingValues, say: (String) -> Unit, goTo: (I
         if (h.processes.isNotEmpty()) item(key = "procs") {
             SectionCard(Modifier.enter(7)) {
                 CardHeader(Icons.Rounded.Memory, "Busiest right now", "Share of the whole CPU", MaterialShapes.Cookie6Sided)
-                val top = h.processes.maxOfOrNull { it.cpu }?.coerceAtLeast(1.0) ?: 1.0
-                h.processes.filter { it.name != "libhone.so" && it.name != "hone" }.take(8).forEach { p ->
+                val busy = h.processes.filter { it.name != "libhone.so" && it.name != "hone" && it.rss > 0 }
+                if (busy.none { it.cpu >= 2.0 }) {
+                    RowLabel("Nothing busy, the phone is idle")
+                }
+                busy.filter { it.cpu >= 0.5 }.take(6).forEach { p ->
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(hone.label(p.name), Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyLarge)
+                            RowLabel(processName(hone, p.name), Modifier.weight(1f))
+                            Spacer(Modifier.width(8.dp))
                             Text("${fmt(p.cpu)}%  ·  ${bytes(p.rss)}", style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
                         }
-                        GradientBar((p.cpu / top).toFloat(), listOf(cs.secondary, cs.primary), cs.surfaceContainerHighest, height = 6.dp)
+                        // Half the CPU fills the bar, so a sliver really is a sliver.
+                        GradientBar((p.cpu / 50).toFloat(), listOf(cs.secondary, if (p.cpu >= 40) cs.error else cs.primary), cs.surfaceContainerHighest, height = 6.dp)
                     }
                 }
             }
@@ -309,7 +314,30 @@ private fun FindingCard(f: Finding, act: (String) -> Unit, modifier: Modifier) {
 private fun cpuNow(hone: Hone, h: Health): Double =
     if (hone.full) h.cpuBusy else h.cpus.map { it.cur.toDouble() / it.max.coerceAtLeast(1) }.average().takeIf { !it.isNaN() }?.times(100) ?: 0.0
 
+private val CHIP = setOf("CPU", "GPU", "NPU", "TPU", "SOC")
+
+/** The chip's sensors often read one value; show them as a single "Chip" row then. */
+private fun mergeChips(temps: List<Temp>): List<Temp> {
+    val chip = temps.filter { it.name in CHIP }
+    if (chip.size < 2 || chip.map { it.celsius }.distinct().size > 1) return temps
+    return listOf(Temp("CHIP", chip.first().celsius)) + temps.filter { it.name !in CHIP }
+}
+
+/** "com.android.systemui:screenshot" -> "System UI · screenshot"; HAL services get a short name. */
+private fun processName(hone: Hone, raw: String): String {
+    val base = raw.substringBefore(':')
+    val part = raw.substringAfter(':', "")
+    val label = hone.label(base).takeIf { it != base } ?: when {
+        base.startsWith("android.hardware.") || base.startsWith("vendor.") ->
+            base.removePrefix("vendor.").removePrefix("android.hardware.").substringBefore('-').substringBefore('@').substringBefore('.')
+                .replaceFirstChar { it.titlecase() } + " service"
+        else -> base
+    }
+    return if (part.isNotEmpty()) "$label · $part" else label
+}
+
 private fun sensorName(raw: String) = when (raw) {
+    "CHIP" -> "Chip"
     "CPU", "GPU", "NPU", "TPU", "SOC" -> raw
     else -> raw.lowercase().replace('_', ' ').replaceFirstChar(Char::titlecase)
 }

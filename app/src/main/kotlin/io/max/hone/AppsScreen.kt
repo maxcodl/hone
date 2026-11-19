@@ -52,6 +52,13 @@ fun AppsScreen(hone: Hone, pad: PaddingValues, say: (String) -> Unit) {
     var confirm by remember { mutableStateOf<Pkg?>(null) }
     val scope = rememberCoroutineScope()
     val cs = MaterialTheme.colorScheme
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var mode by rememberSaveable { mutableIntStateOf(0) }
+    var installed by remember { mutableStateOf<List<InstalledApp>?>(null) }
+    var query by rememberSaveable { mutableStateOf("") }
+    var sort by rememberSaveable { mutableStateOf(AppSort.Name) }
+    var open by remember { mutableStateOf<InstalledApp?>(null) }
+    LaunchedEffect(mode) { if (mode == 1 && installed == null) installed = installedApps(hone, context) }
 
     suspend fun reload() {
         pkgs = runCatching { hone.debloatList() }.onFailure { say("Could not list apps: ${it.message}") }.getOrNull() ?: pkgs
@@ -77,6 +84,15 @@ fun AppsScreen(hone: Hone, pad: PaddingValues, say: (String) -> Unit) {
         )
     }
 
+    open?.let { app ->
+        AppSheet(hone, app, say, onClose = { open = null }, onChanged = {
+            scope.launch {
+                installed = installedApps(hone, context)
+                open = installed?.firstOrNull { it.pkg == app.pkg }
+            }
+        })
+    }
+
     val list = pkgs ?: return Loading(pad, "Listing preinstalled apps")
     val safe = list.filter { it.tag == "safe" && it.state != "removed" }
     val caution = list.filter { it.tag == "caution" && it.state != "removed" }
@@ -100,6 +116,20 @@ fun AppsScreen(hone: Hone, pad: PaddingValues, say: (String) -> Unit) {
                     )
                 }
             }
+        }
+        item(key = "mode") {
+            Row(Modifier.fillMaxWidth().enter(1), horizontalArrangement = Arrangement.spacedBy(ButtonGroupDefaults.ConnectedSpaceBetween)) {
+                listOf("Debloat", "Installed").forEachIndexed { i, label ->
+                    ToggleButton(
+                        checked = mode == i, onCheckedChange = { mode = i }, modifier = Modifier.weight(1f),
+                        shapes = if (i == 0) ButtonGroupDefaults.connectedLeadingButtonShapes() else ButtonGroupDefaults.connectedTrailingButtonShapes(),
+                    ) { Text(label) }
+                }
+            }
+        }
+        if (mode == 1) {
+            appItems(hone, installed, query, { query = it }, sort, { sort = it }) { open = it }
+            return@LazyColumn
         }
         item(key = "filter") {
             Row(Modifier.fillMaxWidth().enter(1), horizontalArrangement = Arrangement.spacedBy(ButtonGroupDefaults.ConnectedSpaceBetween)) {

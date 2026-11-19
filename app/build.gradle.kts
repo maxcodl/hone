@@ -6,6 +6,13 @@ plugins {
     id("org.jetbrains.kotlin.plugin.serialization")
 }
 
+// Debug and release are signed with the key named by signing.file in local.properties (git-ignored), so no
+// secret lives in the project. Without it, release falls back to the debug key.
+val signing = rootProject.file("local.properties").takeIf { it.exists() }
+    ?.let { f -> Properties().apply { f.inputStream().use(::load) } }
+    ?.getProperty("signing.file")?.let { path -> file(path).takeIf { it.exists() } }
+    ?.let { f -> Properties().apply { f.inputStream().use(::load) } }
+
 val sdkDir: String = Properties().apply { rootProject.file("local.properties").takeIf { it.exists() }?.inputStream()?.use(::load) }
     .getProperty("sdk.dir") ?: System.getenv("ANDROID_HOME") ?: ""
 
@@ -41,12 +48,25 @@ android {
         versionName = "0.1.0"
         ndk { abiFilters += "arm64-v8a" }
     }
+    signingConfigs {
+        // Debug and release share one key, so either installs over the other.
+        if (signing != null) {
+            for (name in listOf("debug", "release")) {
+                maybeCreate(name).apply {
+                    storeFile = file(signing.getProperty("keystore.path"))
+                    storePassword = signing.getProperty("keystore.password")
+                    keyAlias = signing.getProperty("key.alias")
+                    keyPassword = signing.getProperty("key.password")
+                }
+            }
+        }
+    }
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }
     }
     compileOptions {

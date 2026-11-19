@@ -31,7 +31,7 @@ import androidx.compose.ui.unit.dp
 
 /** The three looks the user can pick from. */
 enum class Style(val title: String, val blurb: String) {
-    Mono("Mono", "Black and white with dot-matrix numbers, like Nothing OS. Red only for warnings."),
+    Mono("Dot", "Black, white and one red. Dot-matrix type, thin lines, quiet motion."),
     Calm("Calm", "Flat cards, quiet colours from your wallpaper, gentle motion."),
     Expressive("Expressive", "Gradients, morphing shapes and bouncy motion."),
 }
@@ -72,10 +72,21 @@ fun HoneTheme(look: Look, content: @Composable () -> Unit) {
         else -> lightColorScheme()
     }
     val scheme = if (look.amoled) base.pitchBlack() else base
+    val type = androidx.compose.material3.Typography().let { t ->
+        if (!look.mono) t else {
+            val m = androidx.compose.ui.text.font.FontFamily.Monospace
+            t.copy(
+                titleLarge = t.titleLarge.copy(fontFamily = m), titleMedium = t.titleMedium.copy(fontFamily = m),
+                titleSmall = t.titleSmall.copy(fontFamily = m), labelLarge = t.labelLarge.copy(fontFamily = m),
+                labelMedium = t.labelMedium.copy(fontFamily = m), labelSmall = t.labelSmall.copy(fontFamily = m),
+            )
+        }
+    }
     CompositionLocalProvider(LocalLook provides look) {
         MaterialExpressiveTheme(
             colorScheme = scheme,
             motionScheme = if (look.playful) MotionScheme.expressive() else MotionScheme.standard(),
+            typography = type,
             content = content,
         )
     }
@@ -105,12 +116,12 @@ private fun monoDark() = darkColorScheme(
     tertiaryContainer = Color(0xFF2A2A2A), onTertiaryContainer = Color.White,
     error = NothingRed, onError = Color.White,
     errorContainer = Color(0xFF3A0A0C), onErrorContainer = Color(0xFFFFB4B0),
-    background = Color(0xFF0D0D0D), onBackground = Color.White,
-    surface = Color(0xFF0D0D0D), onSurface = Color.White,
+    background = Color.Black, onBackground = Color.White,
+    surface = Color.Black, onSurface = Color.White,
     surfaceVariant = Color(0xFF1E1E1E), onSurfaceVariant = Color(0xFF9E9E9E),
-    surfaceContainerLowest = Color(0xFF0A0A0A), surfaceContainerLow = Color(0xFF121212),
-    surfaceContainer = Color(0xFF171717), surfaceContainerHigh = Color(0xFF1E1E1E),
-    surfaceContainerHighest = Color(0xFF262626),
+    surfaceContainerLowest = Color.Black, surfaceContainerLow = Color(0xFF0B0B0B),
+    surfaceContainer = Color(0xFF111111), surfaceContainerHigh = Color(0xFF171717),
+    surfaceContainerHighest = Color(0xFF1F1F1F),
     outline = Color(0xFF3A3A3A), outlineVariant = Color(0xFF262626),
     inversePrimary = Color(0xFF5E5E5E), inverseSurface = Color.White, inverseOnSurface = Color.Black,
 )
@@ -154,23 +165,49 @@ private val glyphs: Map<Char, List<String>> = mapOf(
     'B' to listOf("11110", "10001", "10001", "11110", "10001", "10001", "11110"),
     'M' to listOf("10001", "11011", "10101", "10101", "10001", "10001", "10001"),
     'K' to listOf("10001", "10010", "10100", "11000", "10100", "10010", "10001"),
+    'A' to listOf("01110", "10001", "10001", "11111", "10001", "10001", "10001"),
+    'C' to listOf("01110", "10001", "10000", "10000", "10000", "10001", "01110"),
+    'D' to listOf("11100", "10010", "10001", "10001", "10001", "10010", "11100"),
+    'E' to listOf("11111", "10000", "10000", "11110", "10000", "10000", "11111"),
+    'F' to listOf("11111", "10000", "10000", "11110", "10000", "10000", "10000"),
+    'H' to listOf("10001", "10001", "10001", "11111", "10001", "10001", "10001"),
+    'I' to listOf("01110", "00100", "00100", "00100", "00100", "00100", "01110"),
+    'J' to listOf("00111", "00010", "00010", "00010", "00010", "10010", "01100"),
+    'L' to listOf("10000", "10000", "10000", "10000", "10000", "10000", "11111"),
+    'N' to listOf("10001", "10001", "11001", "10101", "10011", "10001", "10001"),
+    'O' to listOf("01110", "10001", "10001", "10001", "10001", "10001", "01110"),
+    'P' to listOf("11110", "10001", "10001", "11110", "10000", "10000", "10000"),
+    'Q' to listOf("01110", "10001", "10001", "10001", "10101", "10010", "01101"),
+    'R' to listOf("11110", "10001", "10001", "11110", "10100", "10010", "10001"),
+    'S' to listOf("01111", "10000", "10000", "01110", "00001", "00001", "11110"),
+    'T' to listOf("11111", "00100", "00100", "00100", "00100", "00100", "00100"),
+    'U' to listOf("10001", "10001", "10001", "10001", "10001", "10001", "01110"),
+    'V' to listOf("10001", "10001", "10001", "10001", "10001", "01010", "00100"),
+    'W' to listOf("10001", "10001", "10001", "10101", "10101", "10101", "01010"),
+    'X' to listOf("10001", "10001", "01010", "00100", "01010", "10001", "10001"),
+    'Y' to listOf("10001", "10001", "10001", "01010", "00100", "00100", "00100"),
+    'Z' to listOf("11111", "00001", "00010", "00100", "01000", "10000", "11111"),
+    '-' to listOf("00000", "00000", "00000", "11111", "00000", "00000", "00000"),
+    '/' to listOf("00001", "00010", "00010", "00100", "01000", "01000", "10000"),
+    ':' to listOf("00000", "01100", "01100", "00000", "01100", "01100", "00000"),
 )
 
 /** Text drawn as a 5x7 dot matrix, unlit dots faintly visible, the way Nothing draws numbers. */
 @Composable
 fun DotText(text: String, height: TextUnit, color: Color, modifier: Modifier = Modifier) {
     val cell = with(LocalDensity.current) { height.toDp() } / 7f
-    val chars = text.uppercase().replace(" ", "")
-    val width = cell * (chars.sumOf { if (it == '.') 3 else 6 } - 1).coerceAtLeast(1)
+    val chars = text.uppercase()
+    fun cols(ch: Char) = when (ch) { '.', ':' -> 2; ' ' -> 1; else -> 5 }
+    val width = cell * (chars.sumOf { cols(it) + 1 } - 1).coerceAtLeast(1)
     Canvas(modifier.size(width, cell * 7)) {
         val c = cell.toPx()
         val r = c * 0.36f
         var x0 = 0f
         for (ch in chars) {
             val g = glyphs[ch]
-            val cols = if (ch == '.') 2 else 5
-            val skip = if (ch == '.') 1 else 0
-            for (row in 0 until 7) for (col in 0 until cols) {
+            val cols = cols(ch)
+            val skip = if (ch == '.' || ch == ':') 1 else 0
+            if (ch != ' ') for (row in 0 until 7) for (col in 0 until cols) {
                 val on = g?.get(row)?.get(col + skip) == '1'
                 drawCircle(if (on) color else color.copy(alpha = 0.05f), r, Offset(x0 + col * c + c / 2, row * c + c / 2))
             }

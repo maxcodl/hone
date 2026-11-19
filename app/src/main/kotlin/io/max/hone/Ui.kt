@@ -130,8 +130,10 @@ fun SectionCard(
 @Composable
 fun CardHeader(icon: ImageVector, title: String, subtitle: String? = null, shape: RoundedPolygon = MaterialShapes.Cookie9Sided) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        ShapeIcon(icon, shape)
-        Spacer(Modifier.width(16.dp))
+        if (!LocalLook.current.mono) {
+            ShapeIcon(icon, shape)
+            Spacer(Modifier.width(16.dp))
+        }
         Column(Modifier.weight(1f)) {
             if (LocalLook.current.mono) {
                 Text(title.uppercase(), style = MaterialTheme.typography.titleMedium.copy(fontFamily = FontFamily.Monospace, letterSpacing = 1.5.sp))
@@ -221,6 +223,16 @@ fun Line(label: String, value: String) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text(label, Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
         Text(value, style = MaterialTheme.typography.titleSmall)
+    }
+}
+
+/** Name on a reading row: uppercase mono in Dot, plain text otherwise. */
+@Composable
+fun RowLabel(text: String, modifier: Modifier = Modifier) {
+    if (LocalLook.current.mono) {
+        Text(text.uppercase(), modifier, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    } else {
+        Text(text, modifier, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
