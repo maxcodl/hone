@@ -1,0 +1,7 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- A blade edge over a whetstone. -->
+    <path android:fillColor="#FFF4EFFF" android:pathData="M30,64 L78,64 Q82,64 82,68 L82,72 Q82,76 78,76 L30,76 Q26,76 26,72 L26,68 Q26,64 30,64 Z" />
+    <path android:fillColor="#FFFFD8B0" android:pathData="M34,58 L66,30 Q70,27 73,30 L76,33 Q79,36 76,40 L48,58 Z" />
+</vector>
