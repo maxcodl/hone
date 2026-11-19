@@ -103,7 +103,7 @@ fun HealthScreen(hone: Hone, pad: PaddingValues, say: (String) -> Unit, goTo: (I
             "storage" -> goTo(2)
             "reboot" -> askReboot = true
             "free-ram" -> scope.launch {
-                runCatching { hone.call<Freed>("free-ram") }.onSuccess { say("Freed ${bytes(it.freed)} of memory") }
+                runCatching { hone.freeRam() }.onSuccess { say("Freed ${bytes(it.freed)} of memory") }
                     .onFailure { say("Could not free memory: ${it.message}") }
             }
         }

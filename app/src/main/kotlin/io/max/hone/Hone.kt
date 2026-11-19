@@ -66,7 +66,7 @@ import kotlin.coroutines.resume
     val status: Map<String, String> = emptyMap(),
     val jobRunning: Boolean = false,
 )
-@Serializable data class Freed(val freed: Long = 0, val free: Long = 0, val available: Long = 0)
+@Serializable data class Freed(val freed: Long = 0, val free: Long = 0, val available: Long = 0, val apps: Int = 0)
 @Serializable data class Pkg(val pkg: String, val tag: String, val note: String, val state: String)
 @Serializable data class Pkgs(val packages: List<Pkg> = emptyList())
 @Serializable data class Changed(val ok: Boolean = false, val output: String = "", val status: String = "", val why: String = "")
@@ -213,7 +213,16 @@ class Hone(private val context: Context) {
     data class Volume(val name: String, val path: String, val total: Long, val free: Long, val removable: Boolean)
 
     /** Internal storage and every mounted SD card or USB drive. */
+    private var volumesCache: Pair<Long, List<Volume>>? = null
+
+    /** Volumes, re-read at most every five seconds: screens ask on every redraw. */
     fun volumes(): List<Volume> {
+        val now = System.currentTimeMillis()
+        volumesCache?.let { (at, list) -> if (now - at < 5000) return list }
+        return readVolumes().also { volumesCache = now to it }
+    }
+
+    private fun readVolumes(): List<Volume> {
         val sm = context.getSystemService(StorageManager::class.java)
         return sm.storageVolumes.mapNotNull { v ->
             val dir = (if (android.os.Build.VERSION.SDK_INT >= 30) v.directory else null) ?: return@mapNotNull null
@@ -316,12 +325,34 @@ class Hone(private val context: Context) {
         }
     }
 
+    // ---- keep warm: apps Free memory leaves alone ----
+
+    private val keepPrefs = context.getSharedPreferences("keep", Context.MODE_PRIVATE)
+    var keepWarm by mutableStateOf(keepPrefs.getStringSet("apps", emptySet()).orEmpty().toSet())
+        private set
+
+    fun updateKeepWarm(apps: Set<String>) {
+        keepWarm = apps
+        keepPrefs.edit().putStringSet("apps", apps).apply()
+    }
+
+    /** Launcher, keyboard and Hone: closing them only makes the phone feel slower. */
+    fun alwaysKept(): Set<String> = setOfNotNull(
+        pm.resolveActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME), PackageManager.MATCH_DEFAULT_ONLY)?.activityInfo?.packageName,
+        android.provider.Settings.Secure.getString(context.contentResolver, android.provider.Settings.Secure.DEFAULT_INPUT_METHOD)?.substringBefore('/'),
+        context.packageName,
+    )
+
+    suspend fun freeRam(): Freed =
+        if (full) call("free-ram", *(keepWarm + alwaysKept()).toTypedArray()) else freeRamLocal()
+
     /** Asks Android to close every app's background processes; allowed to any app with a normal permission. */
     suspend fun freeRamLocal(): Freed = withContext(Dispatchers.IO) {
         val am = context.getSystemService(android.app.ActivityManager::class.java)
         fun avail() = android.app.ActivityManager.MemoryInfo().also { am.getMemoryInfo(it) }.availMem
         val before = avail()
-        pm.getInstalledApplications(0).forEach { if (it.packageName != context.packageName) am.killBackgroundProcesses(it.packageName) }
+        val keep = keepWarm + alwaysKept()
+        pm.getInstalledApplications(0).forEach { if (it.packageName !in keep) am.killBackgroundProcesses(it.packageName) }
         delay(1500)
         val after = avail()
         Freed(freed = (after - before).coerceAtLeast(0), available = after)
@@ -363,6 +394,34 @@ class Hone(private val context: Context) {
         }
         context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
+
+    /** What the storage widget shows: 0 total, 1 internal, 2 SD card. Remembered between launches. */
+    var storageScope by mutableStateOf(prefs.getInt("storageScope", 0))
+        private set
+
+    fun nextStorageScope(hasSd: Boolean) {
+        storageScope = if (hasSd) (storageScope + 1) % 3 else if (storageScope == 0) 1 else 0
+        prefs.edit().putInt("storageScope", storageScope).apply()
+    }
+
+    var sdScan by mutableStateOf<Scan?>(null)
+        private set
+    private var sdScanning = false
+
+    fun scanSd(path: String) {
+        if (sdScanning) return
+        sdScanning = true
+        scope.launch {
+            runCatching { call<Scan>("scan", path) }.onSuccess { sdScan = it }
+            sdScanning = false
+        }
+    }
+
+    /** Which part of the Storage tab is open: 0 clean, 1 files, 2 apps. */
+    var storageSection by mutableStateOf(0)
+
+    /** Total size of installed apps, from the last app-size reading, for the space breakdown. */
+    var appsBytes by mutableStateOf(0L)
 
     /** Last storage scan, kept here so it survives switching tabs. */
     var scan by mutableStateOf<Scan?>(null)
@@ -417,7 +476,12 @@ class Hone(private val context: Context) {
         runCatching { pm.getApplicationInfo(pkg, PackageManager.MATCH_UNINSTALLED_PACKAGES).loadLabel(pm).toString() }.getOrDefault(pkg)
     }
 
-    fun isSystem(pkg: String): Boolean = runCatching {
+    private val systemCache = HashMap<String, Boolean>()
+    private val debugCache = HashMap<String, Boolean>()
+
+    fun isSystem(pkg: String): Boolean = systemCache.getOrPut(pkg) { isSystemUncached(pkg) }
+
+    private fun isSystemUncached(pkg: String): Boolean = runCatching {
         pm.getApplicationInfo(pkg, 0).flags and ApplicationInfo.FLAG_SYSTEM != 0
     }.getOrDefault(true)
 
@@ -466,7 +530,9 @@ class Hone(private val context: Context) {
         prefs.edit().putStringSet("cantCompile", entries).apply()
     }
 
-    fun isDebuggable(pkg: String): Boolean = runCatching {
+    fun isDebuggable(pkg: String): Boolean = debugCache.getOrPut(pkg) { isDebuggableUncached(pkg) }
+
+    private fun isDebuggableUncached(pkg: String): Boolean = runCatching {
         pm.getApplicationInfo(pkg, 0).flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
     }.getOrDefault(false)
 

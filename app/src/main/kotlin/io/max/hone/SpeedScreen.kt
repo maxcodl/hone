@@ -62,9 +62,16 @@ fun SpeedScreen(hone: Hone, pad: PaddingValues, say: (String) -> Unit) {
     val cs = MaterialTheme.colorScheme
     LaunchedEffect(Unit) { if (hone.full && hone.dexopt == null) hone.refreshDexopt() }
     var askOptimize by remember { mutableStateOf(false) }
+    var showKeep by remember { mutableStateOf(false) }
+    if (showKeep) KeepWarmSheet(hone) { showKeep = false }
     if (askOptimize) {
         val count = hone.compilable().size
-        Confirm(
+        if (count == 0) androidx.compose.material3.AlertDialog(
+            onDismissRequest = { askOptimize = false },
+            title = { Text("Already optimised") },
+            text = { Text("Every app that can be compiled is. The ones still basic are debug builds or apps Android cannot compile; they are marked in the list below.") },
+            confirmButton = { androidx.compose.material3.TextButton(onClick = { askOptimize = false }) { Text("OK") } },
+        ) else Confirm(
             "Compile $count apps for speed?",
             "Android normally compiles only the parts of apps you use, so these stay basic. This compiles each of them fully: " +
                 "faster to open, but it takes more storage, roughly 1 to 3 MB per app (${bytes(hone.disk().free)} free now). " +
@@ -121,6 +128,7 @@ fun SpeedScreen(hone: Hone, pad: PaddingValues, say: (String) -> Unit) {
                                 when {
                                     d == null -> "Reading compile state, about 15 seconds"
                                     hone.optimizing -> "Compiling ${hone.batchDone + 1} of ${hone.batchTotal}, ${(fast - hone.runStartFast).coerceAtLeast(0)} newly compiled"
+                                    hone.compilable().isEmpty() -> "$fast compiled for speed. The $basic basic ones are debug builds or cannot be compiled."
                                     else -> "$fast apps compiled for speed, $basic still basic"
                                 },
                                 style = MaterialTheme.typography.bodyMedium, color = cs.onPrimaryContainer,
@@ -143,7 +151,7 @@ fun SpeedScreen(hone: Hone, pad: PaddingValues, say: (String) -> Unit) {
                         }
                     } else {
                         Button(
-                            onClick = { askOptimize = true }, enabled = hone.compilable().isNotEmpty(), shapes = ButtonDefaults.shapes(),
+                            onClick = { askOptimize = true }, shapes = ButtonDefaults.shapes(),
                             contentPadding = ButtonDefaults.contentPaddingFor(ButtonDefaults.MediumContainerHeight),
                             modifier = Modifier.fillMaxWidth().height(ButtonDefaults.MediumContainerHeight),
                         ) { Text("Optimise apps", style = ButtonDefaults.textStyleFor(ButtonDefaults.MediumContainerHeight)) }
@@ -153,8 +161,12 @@ fun SpeedScreen(hone: Hone, pad: PaddingValues, say: (String) -> Unit) {
         }
         item(key = "tiles") {
             Row(Modifier.height(androidx.compose.foundation.layout.IntrinsicSize.Min).enter(1), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                Tile(Modifier.weight(1f).fillMaxHeight(), Sym.Memory, MaterialShapes.Cookie9Sided, "Free memory", "Close background apps", busy == "ram", busy == null) {
-                    job("ram") { (if (hone.full) hone.call<Freed>("free-ram") else hone.freeRamLocal()).let { "Freed ${bytes(it.freed)}, ${bytes(it.available)} now free" } }
+                Tile(Modifier.weight(1f).fillMaxHeight(), Sym.Memory, MaterialShapes.Cookie9Sided, "Free memory", "Close background apps", busy == "ram", busy == null, extra = {
+                    androidx.compose.material3.TextButton(onClick = { showKeep = true }, contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)) {
+                        Text("Keep warm: ${hone.keepWarm.size + hone.alwaysKept().size} apps", style = MaterialTheme.typography.labelLarge)
+                    }
+                }) {
+                    job("ram") { hone.freeRam().let { "Closed ${if (it.apps > 0) "${it.apps} apps, " else ""}freed ${bytes(it.freed)}, ${bytes(it.available)} now free" } }
                 }
                 if (hone.full) Tile(Modifier.weight(1f).fillMaxHeight(), Sym.Build, MaterialShapes.Gem, "Storage upkeep", "Trim and tidy storage", busy == "trim", busy == null) {
                     job("trim") { hone.raw("maintenance"); "Storage upkeep started" }
@@ -267,6 +279,7 @@ private fun Tile(
     sub: String,
     running: Boolean,
     enabled: Boolean,
+    extra: @Composable () -> Unit = {},
     onClick: () -> Unit,
 ) {
     val cs = MaterialTheme.colorScheme
@@ -283,6 +296,7 @@ private fun Tile(
             Text(title, style = MaterialTheme.typography.titleMediumEmphasized)
             Text(sub, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
         }
+        extra()
         Spacer(Modifier.weight(1f))
         FilledTonalButton(onClick = onClick, enabled = enabled, shapes = ButtonDefaults.shapes(), modifier = Modifier.fillMaxWidth()) {
             Text(if (running) "Working" else "Run")
