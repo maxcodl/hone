@@ -297,6 +297,7 @@ fun Pill(text: String, dot: Color? = null, container: Color = MaterialTheme.colo
             Text(
                 if (mono) text.uppercase() else text,
                 style = if (mono) MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace) else MaterialTheme.typography.labelLarge,
+                maxLines = 1, softWrap = false,
             )
         }
     }

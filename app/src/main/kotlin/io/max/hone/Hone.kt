@@ -59,11 +59,16 @@ import kotlin.coroutines.resume
 @Serializable data class Proc(val pid: Int, val name: String, val cpu: Double, val rss: Long)
 @Serializable data class Display(val peakRefresh: Double, val animation: Double)
 @Serializable data class Finding(val level: String, val title: String, val detail: String, val action: String = "")
-@Serializable data class Dexopt(val counts: Map<String, Int> = emptyMap(), val slow: List<String> = emptyList(), val compiling: String? = null)
+@Serializable data class Dexopt(
+    val counts: Map<String, Int> = emptyMap(),
+    val slow: List<String> = emptyList(),
+    val compiling: String? = null,
+    val status: Map<String, String> = emptyMap(),
+)
 @Serializable data class Freed(val freed: Long = 0, val free: Long = 0, val available: Long = 0)
 @Serializable data class Pkg(val pkg: String, val tag: String, val note: String, val state: String)
 @Serializable data class Pkgs(val packages: List<Pkg> = emptyList())
-@Serializable data class Changed(val ok: Boolean = false, val output: String = "")
+@Serializable data class Changed(val ok: Boolean = false, val output: String = "", val status: String = "")
 @Serializable data class Compiled(val results: List<Changed> = emptyList())
 @Serializable data class CacheResult(val cleared: Int = 0, val failed: Int = 0, val stuck: Boolean = false, val error: String? = null)
 
@@ -204,6 +209,20 @@ class Hone(private val context: Context) {
 
     // ---- storage ----
 
+    data class Volume(val name: String, val path: String, val total: Long, val free: Long, val removable: Boolean)
+
+    /** Internal storage and every mounted SD card or USB drive. */
+    fun volumes(): List<Volume> {
+        val sm = context.getSystemService(StorageManager::class.java)
+        return sm.storageVolumes.mapNotNull { v ->
+            val dir = (if (android.os.Build.VERSION.SDK_INT >= 30) v.directory else null) ?: return@mapNotNull null
+            runCatching {
+                val s = StatFs(dir.path)
+                Volume(if (v.isPrimary) "Internal storage" else v.getDescription(context), dir.path, s.totalBytes, s.availableBytes, v.isRemovable)
+            }.getOrNull()
+        }
+    }
+
     fun disk(): Disk = StatFs(Environment.getDataDirectory().path).let { Disk(it.totalBytes, it.availableBytes) }
 
     fun openUsageAccess() {
@@ -284,12 +303,14 @@ class Hone(private val context: Context) {
             )
             val extra = buildList {
                 if (thermal >= 2) add(Finding("bad", "Phone is hot", "Android reports it is slowing down to cool off.", ""))
+                // 2 is good; 1 means the phone does not report it, which is not a fault.
+                if (battery.health > 2.0) add(Finding("warn", "Battery health is not good", "The battery reports a fault or wear.", ""))
             }
             h.copy(
                 battery = battery, thermalStatus = thermal, display = display,
                 temps = listOf(Temp("BATTERY", battery.celsius)),
                 processes = emptyList(),
-                findings = h.findings.filter { it.action != "reboot" } + extra,
+                findings = h.findings.filter { it.action != "reboot" && !it.title.startsWith("Battery") && !it.title.startsWith("Phone is hot") } + extra,
             )
         }
     }
@@ -415,15 +436,65 @@ class Hone(private val context: Context) {
     var compilingNow by mutableStateOf<String?>(null)
         private set
 
+    /** Fully compiled apps when the running optimisation started; the live count minus this is its progress. */
+    var runStartFast by mutableStateOf(0)
+        private set
+
+    fun fastCount(d: Dexopt?) = d?.counts?.filterKeys { it in setOf("speed-profile", "speed", "everything") }?.values?.sum() ?: 0
+
+    /** Apps a full compile did not take on (broken install, no code); remembered per version, not retried. */
+    val failedCompile = androidx.compose.runtime.mutableStateListOf<String>().apply {
+        val saved = prefs.getStringSet("cantCompile", emptySet()).orEmpty()
+        saved.forEach { entry ->
+            val (pkg, ver) = entry.substringBefore('@') to entry.substringAfter('@').toLongOrNull()
+            if (ver != null && versionOf(pkg) == ver) add(pkg)
+        }
+    }
+
+    private fun versionOf(pkg: String): Long? = runCatching {
+        val pi = pm.getPackageInfo(pkg, 0)
+        if (android.os.Build.VERSION.SDK_INT >= 28) pi.longVersionCode else @Suppress("DEPRECATION") pi.versionCode.toLong()
+    }.getOrNull()
+
+    private fun rememberCantCompile(pkg: String) {
+        if (pkg !in failedCompile) failedCompile.add(pkg)
+        val entries = failedCompile.mapNotNull { p -> versionOf(p)?.let { "$p@$it" } }.toSet()
+        prefs.edit().putStringSet("cantCompile", entries).apply()
+    }
+
+    fun isDebuggable(pkg: String): Boolean = runCatching {
+        pm.getApplicationInfo(pkg, 0).flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
+    }.getOrDefault(false)
+
+    /** Full compile of one app; on success the counts and list update at once, without a 15-second rescan. */
+    suspend fun compile(pkg: String): Changed {
+        val r = call<Compiled>("compile", "speed", pkg).results.firstOrNull() ?: Changed(false, "no answer")
+        if (!r.ok) rememberCantCompile(pkg)
+        val d = dexopt
+        if (r.ok && d != null) {
+            val old = d.status[pkg]
+            val counts = d.counts.toMutableMap()
+            if (old != null) counts[old] = ((counts[old] ?: 1) - 1).coerceAtLeast(0)
+            counts[r.status] = (counts[r.status] ?: 0) + 1
+            dexopt = d.copy(counts = counts, slow = d.slow - pkg, status = d.status + (pkg to r.status))
+        }
+        return r
+    }
+
     fun refreshDexopt() = scope.launch { dexopt = runCatching { call<Dexopt>("dexopt") }.getOrNull() ?: dexopt }
 
     fun optimize() {
         if (optimizing) return
         optimizing = true
         val watcher = scope.launch {
+            if (dexopt == null) dexopt = runCatching { call<Dexopt>("dexopt") }.getOrNull()
+            runStartFast = fastCount(dexopt)
+            var tick = 0
             while (true) {
                 compilingNow = runCatching { call<Dexopt>("compiling").compiling }.getOrNull()
-                delay(1500)
+                // The full state takes about two seconds to read; every sixth second keeps the ring honest.
+                if (tick++ % 6 == 5) runCatching { call<Dexopt>("dexopt") }.onSuccess { dexopt = it }
+                delay(1000)
             }
         }
         scope.launch {

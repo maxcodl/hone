@@ -1,6 +1,7 @@
 //! Hone engine: runs as the shell user (through Shizuku), reads the phone's state and runs the tune-up
 //! commands. Every command prints one JSON object on stdout.
 
+mod battery;
 mod debloat;
 mod files;
 
@@ -36,6 +37,14 @@ fn main() {
         "maintenance" => output(run("sm", &["idle-maint", "run"])),
         "remove" => change(rest, true),
         "running" => running(),
+        "battery-log" => battery::log(arg(rest, 0), &rest[1.min(rest.len())..]),
+        "battery-history" => battery::history(arg(rest, 0), arg(rest, 1).parse().unwrap_or(0)),
+        "battery-info" => battery::info(),
+        // Background: RUN_ANY_IN_BACKGROUND is what Settings' "Restricted" battery option sets.
+        "bg-restricted" => json!({ "packages": run("cmd", &["appops", "query-op", "RUN_ANY_IN_BACKGROUND", "ignore"]).lines().map(str::trim).filter(|l| l.contains('.') && !l.contains(' ')).collect::<Vec<_>>() }),
+        "bg-restrict" => bg(rest, "ignore"),
+        "bg-allow" => bg(rest, "allow"),
+        "force-stop" => app_action(rest, &[], ""),
         "uninstall" => app_action(rest, &["uninstall"], "Success"),
         "disable" => app_action(rest, &["disable-user", "--user", "0"], "disabled"),
         "enable" => app_action(rest, &["enable", "--user", "0"], "enabled"),
@@ -219,12 +228,18 @@ fn processes() -> (Vec<Value>, f64, Vec<f64>) {
     let (c0, p0) = (cpu_times(), proc_ticks());
     thread::sleep(Duration::from_millis(800));
     let (c1, p1) = (cpu_times(), proc_ticks());
-    let dt = c1.get("cpu").map(|x| x.0).unwrap_or(0).saturating_sub(c0.get("cpu").map(|x| x.0).unwrap_or(0)).max(1) as f64;
+    // Without the shell Android hides /proc/stat; with no total to divide by, any share would be invented.
+    let Some(dt) = c1.get("cpu").zip(c0.get("cpu")).map(|(b, a)| b.0.saturating_sub(a.0)).filter(|d| *d > 0) else {
+        return (vec![], 0.0, vec![]);
+    };
+    let dt = dt as f64;
+    let me = std::process::id();
     let cores = (0..32).take_while(|i| std::path::Path::new(&format!("/sys/devices/system/cpu/cpu{i}")).exists())
         .map(|i| busy(&c0, &c1, &format!("cpu{i}"))).collect();
     let page = page_size();
     let mut v: Vec<(f64, u64, u32)> = p1
         .iter()
+        .filter(|(pid, _)| **pid != me) // the engine itself is not something to act on
         .map(|(pid, (c, rss))| {
             let d = c.saturating_sub(p0.get(pid).map(|x| x.0).unwrap_or(*c));
             (d as f64 / dt * 100.0, rss * page, *pid)
@@ -342,12 +357,12 @@ fn health() -> Value {
 
 /// Per package, the compile state of its base APK.
 fn dexopt_scan() -> BTreeMap<String, String> {
-    let text = run("dumpsys", &["package", "dexopt"]);
+    let text = run("cmd", &["package", "art", "dump"]);
     let mut out = BTreeMap::new();
     let mut current: Option<String> = None;
     for l in text.lines() {
         let t = l.trim();
-        if l.starts_with("  [") && t.ends_with(']') && !t.contains(' ') {
+        if (l.starts_with('[') || l.starts_with("  [")) && t.ends_with(']') && !t.contains(' ') && !t.contains('=') {
             current = Some(t[1..t.len() - 1].to_string());
             continue;
         }
@@ -401,7 +416,10 @@ fn compile(rest: &[String]) -> Value {
         .iter()
         .map(|p| {
             let out = run("cmd", &["package", "compile", "-m", mode, "-f", p]);
-            json!({ "pkg": p, "ok": out.contains("Success"), "output": out })
+            let dump = run("cmd", &["package", "art", "dump", p]);
+            let status = dump.find("[status=").map(|i| dump[i + 8..].split(']').next().unwrap_or("").to_string()).unwrap_or_default();
+            let fast = matches!(status.as_str(), "speed" | "speed-profile" | "everything");
+            json!({ "pkg": p, "ok": out.contains("Success") && fast, "status": status, "output": out })
         })
         .collect();
     json!({ "results": results })
@@ -473,14 +491,26 @@ fn running() -> Value {
     json!({ "packages": set.into_iter().collect::<Vec<_>>() })
 }
 
+fn bg(rest: &[String], mode: &str) -> Value {
+    let pkg = arg(rest, 0);
+    if pkg.is_empty() || pkg == "io.max.hone" || !pkg.contains('.') {
+        return json!({ "ok": false, "output": "not allowed" });
+    }
+    let out = run("cmd", &["appops", "set", pkg, "RUN_ANY_IN_BACKGROUND", mode]);
+    json!({ "ok": out.is_empty() || !out.contains("Error"), "output": out })
+}
+
 /// One package-manager action on an app the user installed. Hone itself is never a target.
 fn app_action(rest: &[String], cmd: &[&str], ok_word: &str) -> Value {
     let pkg = arg(rest, 0);
     if pkg.is_empty() || pkg == "io.max.hone" || !pkg.contains('.') {
         return json!({ "ok": false, "output": "not allowed" });
     }
-    let args = [&["package"][..], cmd, &[pkg]].concat();
-    let out = run("cmd", &args);
+    let out = if cmd.is_empty() {
+        run("am", &["force-stop", pkg])
+    } else {
+        run("cmd", &[&["package"][..], cmd, &[pkg]].concat())
+    };
     let ok = !out.contains("Exception") && !out.contains("Error") && !out.contains("Failure") && (ok_word.is_empty() || out.contains(ok_word));
     json!({ "ok": ok, "output": out })
 }

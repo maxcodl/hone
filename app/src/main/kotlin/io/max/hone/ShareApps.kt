@@ -33,6 +33,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.Archive
+import androidx.compose.material.icons.rounded.Bedtime
+import androidx.compose.material.icons.rounded.PlayCircle
+import androidx.compose.material.icons.rounded.StopCircle
 import androidx.compose.material.icons.rounded.Block
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Delete
@@ -88,6 +91,7 @@ data class InstalledApp(
     val dataBytes: Long?,
     val lastUsed: Long?,
     val running: Boolean,
+    val bgRestricted: Boolean = false,
 ) {
     val totalBytes get() = apkBytes + (dataBytes ?: 0)
 }
@@ -111,6 +115,7 @@ suspend fun installedApps(hone: Hone, context: Context): List<InstalledApp> = wi
         context.getSystemService(UsageStatsManager::class.java).queryAndAggregateUsageStats(now - 60L * 86_400_000, now).mapValues { it.value.lastTimeUsed }
     }.getOrDefault(emptyMap())
     val running: Set<String> = if (hone.full) runCatching { hone.call<Running>("running").packages.toSet() }.getOrDefault(emptySet()) else emptySet()
+    val restricted: Set<String> = if (hone.full) runCatching { hone.call<Running>("bg-restricted").packages.toSet() }.getOrDefault(emptySet()) else emptySet()
     infos
         .filter { it.flags and ApplicationInfo.FLAG_SYSTEM == 0 || it.flags and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP != 0 }
         .map { info ->
@@ -132,6 +137,7 @@ suspend fun installedApps(hone: Hone, context: Context): List<InstalledApp> = wi
                 }.getOrNull(),
                 lastUsed = lastUsed[info.packageName]?.takeIf { it > 0 },
                 running = info.packageName in running,
+                bgRestricted = info.packageName in restricted,
             )
         }
 }
@@ -240,6 +246,7 @@ fun LazyListScope.appItems(
                     app.pkg == "io.max.hone" -> Pill("This app", MaterialTheme.colorScheme.primary)
                     app.archived -> Pill("Archived", MaterialTheme.colorScheme.tertiary)
                     !app.enabled -> Pill("Off", MaterialTheme.colorScheme.error)
+                    app.bgRestricted -> Pill("No background", MaterialTheme.colorScheme.outline)
                     app.running -> Pill("Running", Color(0xFF4CAF50))
                 }
             }
@@ -328,6 +335,16 @@ fun AppSheet(hone: Hone, app: InstalledApp, say: (String) -> Unit, onClose: () -
                 else -> Action(Icons.Rounded.Block, "Turn off", "Hidden and stopped until turned on again") {
                     if (hone.full) ask = Triple("disable", "Turn off ${app.label}?", "It disappears from the launcher and stops running. Turn it on again here any time.")
                     else hone.openAppInfo(app.pkg)
+                }
+            }
+            if (!self && app.enabled && !app.archived) {
+                if (app.bgRestricted) Action(Icons.Rounded.PlayCircle, "Allow background", "Let it run when you are not using it") {
+                    if (hone.full) shell("bg-allow", "${app.label} may run in the background") else hone.openAppInfo(app.pkg)
+                } else Action(Icons.Rounded.Bedtime, "Restrict background", "Stops it running when you are not using it; notifications may come late") {
+                    if (hone.full) shell("bg-restrict", "${app.label} restricted in the background") else hone.openAppInfo(app.pkg)
+                }
+                if (app.running || !hone.full) Action(Icons.Rounded.StopCircle, "Force stop", "Closes it now; it may start again later") {
+                    if (hone.full) shell("force-stop", "${app.label} stopped") else hone.openAppInfo(app.pkg)
                 }
             }
             if (Build.VERSION.SDK_INT >= 35 && !self) {

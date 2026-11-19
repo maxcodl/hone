@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -60,6 +61,8 @@ fun SpeedScreen(hone: Hone, pad: PaddingValues, say: (String) -> Unit) {
     var busy by remember { mutableStateOf<String?>(null) }
     var askReboot by remember { mutableStateOf(false) }
     val compiling = remember { mutableStateListOf<String>() }
+    var batchTotal by remember { mutableStateOf(0) }
+    var batchDone by remember { mutableStateOf(0) }
     val cs = MaterialTheme.colorScheme
     LaunchedEffect(Unit) { if (hone.full && hone.dexopt == null) hone.refreshDexopt() }
 
@@ -107,8 +110,11 @@ fun SpeedScreen(hone: Hone, pad: PaddingValues, say: (String) -> Unit) {
                         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             Text("App optimisation", style = MaterialTheme.typography.titleLargeEmphasized, color = cs.onPrimaryContainer)
                             Text(
-                                if (d == null) "Reading compile state, about 15 seconds"
-                                else "$fast apps compiled for speed, $basic still basic",
+                                when {
+                                    d == null -> "Reading compile state, about 15 seconds"
+                                    hone.optimizing -> "${(fast - hone.runStartFast).coerceAtLeast(0)} more compiled this run, $basic still basic"
+                                    else -> "$fast apps compiled for speed, $basic still basic"
+                                },
                                 style = MaterialTheme.typography.bodyMedium, color = cs.onPrimaryContainer,
                             )
                         }
@@ -133,11 +139,11 @@ fun SpeedScreen(hone: Hone, pad: PaddingValues, say: (String) -> Unit) {
             }
         }
         item(key = "tiles") {
-            Row(Modifier.enter(1), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                Tile(Modifier.weight(1f), Icons.Rounded.Memory, MaterialShapes.Cookie9Sided, "Free memory", "Close background apps", busy == "ram", busy == null) {
+            Row(Modifier.height(androidx.compose.foundation.layout.IntrinsicSize.Min).enter(1), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                Tile(Modifier.weight(1f).fillMaxHeight(), Icons.Rounded.Memory, MaterialShapes.Cookie9Sided, "Free memory", "Close background apps", busy == "ram", busy == null) {
                     job("ram") { (if (hone.full) hone.call<Freed>("free-ram") else hone.freeRamLocal()).let { "Freed ${bytes(it.freed)}, ${bytes(it.available)} now free" } }
                 }
-                if (hone.full) Tile(Modifier.weight(1f), Icons.Rounded.Build, MaterialShapes.Gem, "Storage upkeep", "Trim and tidy storage", busy == "trim", busy == null) {
+                if (hone.full) Tile(Modifier.weight(1f).fillMaxHeight(), Icons.Rounded.Build, MaterialShapes.Gem, "Storage upkeep", "Trim and tidy storage", busy == "trim", busy == null) {
                     job("trim") { hone.raw("maintenance"); "Storage upkeep started" }
                 }
             }
@@ -151,8 +157,11 @@ fun SpeedScreen(hone: Hone, pad: PaddingValues, say: (String) -> Unit) {
             }
         }
 
-        val slowApps = if (!hone.full) emptyList() else d?.slow.orEmpty().filter { !hone.isSystem(it) }
-        if (slowApps.isNotEmpty()) {
+        val mine = if (!hone.full) emptyList() else d?.slow.orEmpty().filter { !hone.isSystem(it) }
+        // Android never fully compiles debug builds; listing them only invites taps that cannot work.
+        val debugBuilds = mine.filter { hone.isDebuggable(it) }
+        val slowApps = mine - debugBuilds.toSet() - hone.failedCompile.toSet()
+        if (mine.isNotEmpty()) {
             item(key = "slowHead") {
                 SectionCard(Modifier.enter(3)) {
                     Text("Your apps not fully optimised", style = MaterialTheme.typography.titleLargeEmphasized)
@@ -160,21 +169,36 @@ fun SpeedScreen(hone: Hone, pad: PaddingValues, say: (String) -> Unit) {
                         "Android compiles only the parts of an app you use. A full compile makes every part fast, but uses more space.",
                         style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant,
                     )
-                    FilledTonalButton(
+                    if (debugBuilds.isNotEmpty()) Text(
+                        "Debug builds always run uncompiled; Android does not allow it for them.",
+                        style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant,
+                    )
+                    if (batchTotal > 0) {
+                        Text("Compiling ${batchDone + 1} of $batchTotal", style = MaterialTheme.typography.titleSmall)
+                        androidx.compose.material3.LinearWavyProgressIndicator(progress = { batchDone.toFloat() / batchTotal }, modifier = Modifier.fillMaxWidth())
+                    }
+                    if (slowApps.isNotEmpty()) FilledTonalButton(
                         onClick = {
                             scope.launch {
-                                compiling.addAll(slowApps)
-                                val r = runCatching { hone.call<Compiled>("compile", "speed", *slowApps.toTypedArray()) }
-                                compiling.clear()
-                                hone.refreshDexopt()
-                                say(r.map { "Compiled ${it.results.count { x -> x.ok }} of ${slowApps.size} apps" }.getOrElse { "Failed: ${it.message}" })
+                                val queue = slowApps.toList()
+                                batchTotal = queue.size
+                                var ok = 0
+                                queue.forEachIndexed { i, pkg ->
+                                    batchDone = i
+                                    compiling.add(pkg)
+                                    if (runCatching { hone.compile(pkg).ok }.getOrDefault(false)) ok++
+                                    compiling.remove(pkg)
+                                }
+                                batchTotal = 0
+                                batchDone = 0
+                                say("Compiled $ok of ${queue.size} apps")
                             }
                         },
                         enabled = compiling.isEmpty(), shapes = ButtonDefaults.shapes(), modifier = Modifier.align(Alignment.End),
                     ) { Text("Compile all ${slowApps.size}") }
                 }
             }
-            itemsIndexed(slowApps, key = { _, p -> p }) { i, pkg ->
+            itemsIndexed(slowApps + mine.filter { it !in slowApps }, key = { _, p -> p }) { i, pkg ->
                 RowCard(Modifier.animateItem().enter(i + 4)) {
                     Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
                         AppIcon(hone, pkg, 44.dp)
@@ -182,15 +206,26 @@ fun SpeedScreen(hone: Hone, pad: PaddingValues, say: (String) -> Unit) {
                         Text(hone.label(pkg), Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium)
                         if (pkg in compiling) {
                             LoadingIndicator(Modifier.size(40.dp))
+                        } else if (pkg in debugBuilds || pkg in hone.failedCompile) {
+                            Text(
+                                if (pkg in debugBuilds) "Debug build" else "Can't compile",
+                                style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant,
+                                modifier = Modifier.padding(end = 12.dp),
+                            )
                         } else {
                             FilledTonalButton(
                                 onClick = {
                                     scope.launch {
                                         compiling.add(pkg)
-                                        val ok = runCatching { hone.call<Compiled>("compile", "speed", pkg).results.firstOrNull()?.ok == true }.getOrDefault(false)
+                                        val r = runCatching { hone.compile(pkg) }.getOrNull()
                                         compiling.remove(pkg)
-                                        say(if (ok) "${hone.label(pkg)} compiled" else "Could not compile ${hone.label(pkg)}")
-                                        hone.refreshDexopt()
+                                        say(
+                                            when {
+                                                r?.ok == true -> "${hone.label(pkg)} compiled for speed"
+                                                r != null -> "${hone.label(pkg)} stayed ${r.status.ifEmpty { "basic" }}"
+                                                else -> "Could not compile ${hone.label(pkg)}"
+                                            },
+                                        )
                                     }
                                 },
                                 shapes = ButtonDefaults.shapes(),
@@ -230,6 +265,7 @@ private fun Tile(
             Text(title, style = MaterialTheme.typography.titleMediumEmphasized)
             Text(sub, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
         }
+        Spacer(Modifier.weight(1f))
         FilledTonalButton(onClick = onClick, enabled = enabled, shapes = ButtonDefaults.shapes(), modifier = Modifier.fillMaxWidth()) {
             Text(if (running) "Working" else "Run")
         }

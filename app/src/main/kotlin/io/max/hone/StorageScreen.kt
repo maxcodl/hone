@@ -32,6 +32,7 @@ import androidx.compose.material.icons.rounded.Android
 import androidx.compose.material.icons.rounded.AutoDelete
 import androidx.compose.material.icons.rounded.CleaningServices
 import androidx.compose.material.icons.rounded.Person
+import androidx.compose.material.icons.rounded.SdStorage
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ButtonGroupDefaults
@@ -152,7 +153,7 @@ fun StorageScreen(hone: Hone, pad: PaddingValues, say: (String) -> Unit) {
                         Donut(legend.map { it.second.toFloat() to it.third }, Modifier.size(210.dp)) {
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                 BigValue(bytes(disk.free), MaterialTheme.typography.headlineMediumEmphasized, color = cs.onPrimaryContainer)
-                                Text("free of ${bytes(disk.total)}", style = MaterialTheme.typography.labelLarge, color = cs.onPrimaryContainer)
+                                Text("internal, free of ${bytes(disk.total)}", style = MaterialTheme.typography.labelLarge, color = cs.onPrimaryContainer)
                             }
                         }
                     }
@@ -164,6 +165,16 @@ fun StorageScreen(hone: Hone, pad: PaddingValues, say: (String) -> Unit) {
             }
         }
 
+        // One card per volume, so an SD card is never folded into internal storage.
+        hone.volumes().filter { it.removable }.forEach { v ->
+            item(key = "vol:" + v.path) {
+                SectionCard(Modifier.enter(1)) {
+                    val used = 1f - v.free.toFloat() / v.total.coerceAtLeast(1)
+                    CardHeader(Icons.Rounded.SdStorage, v.name, "${bytes(v.free)} free of ${bytes(v.total)}  ·  ${(used * 100).toInt()}% used", MaterialShapes.Square)
+                    GradientBar(used, listOf(cs.tertiary, if (used > 0.9f) cs.error else cs.primary), cs.surfaceContainerHighest)
+                }
+            }
+        }
         item(key = "result") {
             AnimatedVisibility(result != null, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
                 SectionCard(container = cs.secondaryContainer) {
@@ -188,14 +199,14 @@ fun StorageScreen(hone: Hone, pad: PaddingValues, say: (String) -> Unit) {
         if (hone.full) item(key = "cleaners") {
             val user = list?.filter { !it.system && it.cache > 0 && it.pkg != "io.max.hone" }.orEmpty()
             val system = list?.filter { it.system && it.cache > 0 }.orEmpty()
-            Row(Modifier.enter(1), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            Row(Modifier.height(androidx.compose.foundation.layout.IntrinsicSize.Min).enter(1), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                 Cleaner(
-                    Modifier.weight(1f), Icons.Rounded.Person, MaterialShapes.Clover4Leaf, "Your apps",
+                    Modifier.weight(1f).fillMaxHeight(), Icons.Rounded.Person, MaterialShapes.Clover4Leaf, "Your apps",
                     user.sumOf { it.cache }, list?.let { "${user.size} apps" } ?: "Measuring",
                     busy == "user", busy == null && user.isNotEmpty(),
                 ) { clean("user", user) }
                 Cleaner(
-                    Modifier.weight(1f), Icons.Rounded.Android, MaterialShapes.Cookie7Sided, "System apps",
+                    Modifier.weight(1f).fillMaxHeight(), Icons.Rounded.Android, MaterialShapes.Cookie7Sided, "System apps",
                     system.sumOf { it.cache }, list?.let { "${system.size} apps" } ?: "Measuring",
                     busy == "system", busy == null && system.isNotEmpty(),
                 ) { clean("system", system) }
@@ -272,6 +283,7 @@ private fun Cleaner(
             BigValue(bytes(cache), MaterialTheme.typography.headlineSmallEmphasized, color = cs.primary)
             Text("cache in $sub", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
         }
+        Spacer(Modifier.weight(1f))
         FilledTonalButton(onClick = onClick, enabled = enabled, shapes = ButtonDefaults.shapes(), modifier = Modifier.fillMaxWidth()) {
             Text(if (running) "Clearing" else "Clear")
         }

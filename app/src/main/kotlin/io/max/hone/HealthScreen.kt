@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
@@ -108,7 +109,7 @@ fun HealthScreen(hone: Hone, pad: PaddingValues, say: (String) -> Unit, goTo: (I
     )
     val act: (String) -> Unit = { action ->
         when (action) {
-            "storage" -> goTo(1)
+            "storage" -> goTo(2)
             "reboot" -> askReboot = true
             "free-ram" -> scope.launch {
                 runCatching { hone.call<Freed>("free-ram") }.onSuccess { say("Freed ${bytes(it.freed)} of memory") }
@@ -161,9 +162,9 @@ fun HealthScreen(hone: Hone, pad: PaddingValues, say: (String) -> Unit, goTo: (I
         }
 
         item(key = "live") {
-            Row(Modifier.enter(2), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                LiveCard("CPU", "${fmt(cpuNow(hone, h), 0)}%", if (hone.full) "busy" else "clock", cpuHistory, 100f, cs.primary, Modifier.weight(1f))
-                LiveCard("Memory", bytes(h.memory.available), "free", memHistory, 100f, cs.tertiary, Modifier.weight(1f))
+            Row(Modifier.height(androidx.compose.foundation.layout.IntrinsicSize.Min).enter(2), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                LiveCard("CPU", "${fmt(cpuNow(hone, h), 0)}%", if (hone.full) "busy" else "clock", cpuHistory, 100f, cs.primary, Modifier.weight(1f).fillMaxHeight())
+                LiveCard("Memory", bytes(h.memory.available), "free", memHistory, 100f, cs.tertiary, Modifier.weight(1f).fillMaxHeight())
             }
         }
 
@@ -268,11 +269,8 @@ fun HealthScreen(hone: Hone, pad: PaddingValues, say: (String) -> Unit, goTo: (I
 private fun LiveCard(title: String, value: String, unit: String, history: List<Float>, max: Float, color: Color, modifier: Modifier) {
     SectionCard(modifier) {
         Text(title, style = MaterialTheme.typography.titleMediumEmphasized, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Row(verticalAlignment = Alignment.Bottom) {
-            BigValue(value, MaterialTheme.typography.headlineSmallEmphasized)
-            Spacer(Modifier.width(6.dp))
-            Text(unit, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
+        BigValue(value, MaterialTheme.typography.headlineSmallEmphasized)
+        Text(unit, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
         Box(Modifier.fillMaxWidth().height(64.dp)) {
             Sparkline(history, max, color, Modifier.fillMaxWidth().height(64.dp))
         }

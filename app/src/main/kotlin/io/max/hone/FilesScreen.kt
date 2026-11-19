@@ -103,7 +103,7 @@ fun FilesScreen(hone: Hone, pad: PaddingValues, say: (String) -> Unit) {
 
     BackHandler(page != Page.Overview) {
         page = when (val p = page) {
-            is Page.Browse -> p.path.substringBeforeLast('/').takeIf { p.path != ROOT && it.startsWith(ROOT) }?.let { Page.Browse(it) } ?: Page.Overview
+            is Page.Browse -> p.path.substringBeforeLast('/').takeIf { p.path != ROOT && p.path.count { c -> c == '/' } > 2 }?.let { Page.Browse(it) } ?: Page.Overview
             else -> Page.Overview
         }
     }
@@ -127,7 +127,7 @@ fun FilesScreen(hone: Hone, pad: PaddingValues, say: (String) -> Unit) {
         Page.Overview -> Overview(hone, pad, say, open = { page = it })
         is Page.Group -> GroupPage(hone, pad, p.id, say) { page = Page.Overview }
         is Page.Browse -> BrowsePage(hone, pad, p.path, say, open = { page = Page.Browse(it) }, up = {
-            page = if (p.path == ROOT) Page.Overview else Page.Browse(p.path.substringBeforeLast('/'))
+            page = if (p.path == ROOT || p.path.count { it == '/' } <= 2) Page.Overview else Page.Browse(p.path.substringBeforeLast('/'))
         })
         Page.Trash -> TrashPage(hone, pad, say) { page = Page.Overview }
     }
@@ -165,6 +165,9 @@ private fun Overview(hone: Hone, pad: PaddingValues, say: (String) -> Unit, open
                                 Text(if (hone.scanning) "Scanning" else "Scan again")
                             }
                             OutlinedButton(onClick = { open(Page.Browse(ROOT)) }, shapes = ButtonDefaults.shapes()) { Text("Browse files") }
+                            hone.volumes().firstOrNull { it.removable }?.let { sd ->
+                                OutlinedButton(onClick = { open(Page.Browse(sd.path)) }, shapes = ButtonDefaults.shapes()) { Text("SD card") }
+                            }
                         }
                     }
                 }
@@ -316,7 +319,7 @@ private fun BrowsePage(hone: Hone, pad: PaddingValues, path: String, say: (Strin
                         IconButton(onClick = up) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Up") }
                         Spacer(Modifier.width(4.dp))
                         Column(Modifier.weight(1f)) {
-                            Text(if (path == ROOT) "Internal storage" else path.substringAfterLast('/'), style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(if (path == ROOT) "Internal storage" else if (path.count { it == '/' } == 2) "SD card" else path.substringAfterLast('/'), style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Text(path.removePrefix(ROOT).ifEmpty { "/" }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                         if (listing != null) Text(bytes(entries.sumOf { it.bytes }), style = MaterialTheme.typography.titleSmall)

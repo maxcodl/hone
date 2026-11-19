@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -100,10 +101,10 @@ fun ShapeIcon(
     val mod = when (look.style) {
         Style.Expressive -> Modifier.size(size).clip(shape.toShape()).background(container)
         Style.Calm -> Modifier.size(size).clip(CircleShape).background(container)
-        Style.Mono -> Modifier.size(size).border(1.dp, cs.outline, CircleShape)
+        Style.Mono -> Modifier.size(size)
     }
     Box(mod, contentAlignment = Alignment.Center) {
-        Icon(icon, null, tint = if (look.mono) cs.onSurface else content, modifier = Modifier.size(size * 0.5f))
+        Icon(icon, null, tint = if (look.mono) cs.onSurface else content, modifier = Modifier.size(if (look.mono) size * 0.6f else size * 0.5f))
     }
 }
 
@@ -123,14 +124,17 @@ fun SectionCard(
         colors = CardDefaults.cardColors(containerColor = if (look.mono && plain) cs.surfaceContainerLow else container),
         border = if (look.cardBorder) BorderStroke(1.dp, cs.outlineVariant) else null,
     ) {
-        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp), content = content)
+        Column(Modifier.fillMaxHeight().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp), content = content)
     }
 }
 
 @Composable
 fun CardHeader(icon: ImageVector, title: String, subtitle: String? = null, shape: RoundedPolygon = MaterialShapes.Cookie9Sided) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        if (!LocalLook.current.mono) {
+        if (LocalLook.current.mono) {
+            Icon(icon, null, Modifier.size(24.dp), tint = MaterialTheme.colorScheme.onSurface)
+            Spacer(Modifier.width(12.dp))
+        } else {
             ShapeIcon(icon, shape)
             Spacer(Modifier.width(16.dp))
         }

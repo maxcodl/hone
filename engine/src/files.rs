@@ -277,7 +277,7 @@ pub fn scan(installed: &HashSet<String>) -> Value {
 
 pub fn ls(path: &str) -> Value {
     let dir = Path::new(if path.is_empty() { ROOT } else { path });
-    if !dir.starts_with(ROOT) {
+    if !dir.starts_with("/storage/") || dir.starts_with("/storage/self") {
         return json!({ "error": "outside shared storage" });
     }
     let mut entries: Vec<Value> = vec![];
