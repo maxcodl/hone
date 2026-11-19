@@ -27,12 +27,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Android
-import androidx.compose.material.icons.rounded.AutoDelete
-import androidx.compose.material.icons.rounded.CleaningServices
-import androidx.compose.material.icons.rounded.Person
-import androidx.compose.material.icons.rounded.SdStorage
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ButtonGroupDefaults
@@ -170,7 +164,7 @@ fun StorageScreen(hone: Hone, pad: PaddingValues, say: (String) -> Unit) {
             item(key = "vol:" + v.path) {
                 SectionCard(Modifier.enter(1)) {
                     val used = 1f - v.free.toFloat() / v.total.coerceAtLeast(1)
-                    CardHeader(Icons.Rounded.SdStorage, v.name, "${bytes(v.free)} free of ${bytes(v.total)}  ·  ${(used * 100).toInt()}% used", MaterialShapes.Square)
+                    CardHeader(Sym.SdCard, v.name, "${bytes(v.free)} free of ${bytes(v.total)}  ·  ${(used * 100).toInt()}% used", MaterialShapes.Square)
                     GradientBar(used, listOf(cs.tertiary, if (used > 0.9f) cs.error else cs.primary), cs.surfaceContainerHighest)
                 }
             }
@@ -185,7 +179,7 @@ fun StorageScreen(hone: Hone, pad: PaddingValues, say: (String) -> Unit) {
 
         if (!allowed) item(key = "usage") {
             SectionCard(Modifier.enter(1)) {
-                CardHeader(Icons.Rounded.Person, "Allow usage access", "Android needs this before Hone can measure each app. Turn it on for Hone, then come back.", MaterialShapes.Clover4Leaf)
+                CardHeader(Sym.Person, "Allow usage access", "Android needs this before Hone can measure each app. Turn it on for Hone, then come back.", MaterialShapes.Clover4Leaf)
                 Button(onClick = { hone.openUsageAccess() }, shapes = ButtonDefaults.shapes(), modifier = Modifier.align(Alignment.End)) { Text("Open settings") }
             }
         }
@@ -201,12 +195,12 @@ fun StorageScreen(hone: Hone, pad: PaddingValues, say: (String) -> Unit) {
             val system = list?.filter { it.system && it.cache > 0 }.orEmpty()
             Row(Modifier.height(androidx.compose.foundation.layout.IntrinsicSize.Min).enter(1), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                 Cleaner(
-                    Modifier.weight(1f).fillMaxHeight(), Icons.Rounded.Person, MaterialShapes.Clover4Leaf, "Your apps",
+                    Modifier.weight(1f).fillMaxHeight(), Sym.Person, MaterialShapes.Clover4Leaf, "Your apps",
                     user.sumOf { it.cache }, list?.let { "${user.size} apps" } ?: "Measuring",
                     busy == "user", busy == null && user.isNotEmpty(),
                 ) { clean("user", user) }
                 Cleaner(
-                    Modifier.weight(1f).fillMaxHeight(), Icons.Rounded.Android, MaterialShapes.Cookie7Sided, "System apps",
+                    Modifier.weight(1f).fillMaxHeight(), Sym.Android, MaterialShapes.Cookie7Sided, "System apps",
                     system.sumOf { it.cache }, list?.let { "${system.size} apps" } ?: "Measuring",
                     busy == "system", busy == null && system.isNotEmpty(),
                 ) { clean("system", system) }
@@ -214,7 +208,7 @@ fun StorageScreen(hone: Hone, pad: PaddingValues, say: (String) -> Unit) {
         }
         if (hone.full) item(key = "deep") {
             SectionCard(Modifier.enter(2)) {
-                CardHeader(Icons.Rounded.CleaningServices, "Deep clean", "Asks Android to drop every cache it can, all at once.", MaterialShapes.Flower)
+                CardHeader(Sym.Cleaning, "Deep clean", "Asks Android to drop every cache it can, all at once.", MaterialShapes.Flower)
                 Button(
                     onClick = { deepClean() }, enabled = busy == null, shapes = ButtonDefaults.shapes(),
                     modifier = Modifier.align(Alignment.End),
@@ -318,7 +312,7 @@ private fun AppSizeRow(hone: Hone, app: AppSize, biggest: Long, canClear: Boolea
             if (app.cache > 0 && canClear) {
                 Spacer(Modifier.width(8.dp))
                 FilledTonalIconButton(onClick = onClear, enabled = canClear, shapes = IconButtonDefaults.shapes()) {
-                    Icon(Icons.Rounded.AutoDelete, "Clear cache of ${app.label}")
+                    Icon(Sym.AutoDelete, "Clear cache of ${app.label}")
                 }
             }
         }

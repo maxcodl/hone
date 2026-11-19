@@ -101,10 +101,10 @@ fun ShapeIcon(
     val mod = when (look.style) {
         Style.Expressive -> Modifier.size(size).clip(shape.toShape()).background(container)
         Style.Calm -> Modifier.size(size).clip(CircleShape).background(container)
-        Style.Mono -> Modifier.size(size)
+        Style.Mono -> Modifier.size(size).clip(shape.toShape()).background(cs.surfaceContainerHighest)
     }
     Box(mod, contentAlignment = Alignment.Center) {
-        Icon(icon, null, tint = if (look.mono) cs.onSurface else content, modifier = Modifier.size(if (look.mono) size * 0.6f else size * 0.5f))
+        Icon(icon, null, tint = if (look.mono) cs.onSurface else content, modifier = Modifier.size(size * 0.5f))
     }
 }
 
@@ -131,13 +131,8 @@ fun SectionCard(
 @Composable
 fun CardHeader(icon: ImageVector, title: String, subtitle: String? = null, shape: RoundedPolygon = MaterialShapes.Cookie9Sided) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        if (LocalLook.current.mono) {
-            Icon(icon, null, Modifier.size(24.dp), tint = MaterialTheme.colorScheme.onSurface)
-            Spacer(Modifier.width(12.dp))
-        } else {
-            ShapeIcon(icon, shape)
-            Spacer(Modifier.width(16.dp))
-        }
+        ShapeIcon(icon, shape)
+        Spacer(Modifier.width(16.dp))
         Column(Modifier.weight(1f)) {
             if (LocalLook.current.mono) {
                 Text(title.uppercase(), style = MaterialTheme.typography.titleMedium.copy(fontFamily = FontFamily.Monospace, letterSpacing = 1.5.sp))

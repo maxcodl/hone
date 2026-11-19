@@ -30,20 +30,6 @@ import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.OpenInNew
-import androidx.compose.material.icons.rounded.Archive
-import androidx.compose.material.icons.rounded.Bedtime
-import androidx.compose.material.icons.rounded.PlayCircle
-import androidx.compose.material.icons.rounded.StopCircle
-import androidx.compose.material.icons.rounded.Block
-import androidx.compose.material.icons.rounded.CheckCircle
-import androidx.compose.material.icons.rounded.Delete
-import androidx.compose.material.icons.rounded.Download
-import androidx.compose.material.icons.rounded.Info
-import androidx.compose.material.icons.rounded.Search
-import androidx.compose.material.icons.rounded.Share
-import androidx.compose.material.icons.rounded.Unarchive
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilterChip
@@ -211,7 +197,7 @@ fun LazyListScope.appItems(
     item(key = "search") {
         OutlinedTextField(
             value = query, onValueChange = onQuery, singleLine = true,
-            leadingIcon = { Icon(Icons.Rounded.Search, null) },
+            leadingIcon = { Icon(Sym.Search, null) },
             placeholder = { Text("Search apps") },
             shape = CircleShape,
             modifier = Modifier.fillMaxWidth(),
@@ -321,41 +307,41 @@ fun AppSheet(hone: Hone, app: InstalledApp, say: (String) -> Unit, onClose: () -
             }
             Spacer(Modifier.height(8.dp))
             val launch = context.packageManager.getLaunchIntentForPackage(app.pkg)
-            if (launch != null && app.enabled && !app.archived) Action(Icons.AutoMirrored.Rounded.OpenInNew, "Open") {
+            if (launch != null && app.enabled && !app.archived) Action(Sym.OpenInNew, "Open") {
                 context.startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); onClose()
             }
-            Action(Icons.Rounded.Info, "App info") { hone.openAppInfo(app.pkg) }
+            Action(Sym.Info, "App info") { hone.openAppInfo(app.pkg) }
             if (!app.archived) {
-                Action(Icons.Rounded.Share, "Share APK", if (app.split) "As one .apks file" else null) { run("share") { shareApp(context, app); "Choose where to send it" } }
-                Action(Icons.Rounded.Download, "Save APK", "To Download/Hone") { run("save") { "Saved to ${saveApp(context, app)}" } }
+                Action(Sym.Share, "Share APK", if (app.split) "As one .apks file" else null) { run("share") { shareApp(context, app); "Choose where to send it" } }
+                Action(Sym.Download, "Save APK", "To Download/Hone") { run("save") { "Saved to ${saveApp(context, app)}" } }
             }
             val self = app.pkg == context.packageName
             if (!self) when {
-                !app.enabled -> Action(Icons.Rounded.CheckCircle, "Turn on") { if (hone.full) shell("enable", "${app.label} turned on") else hone.openAppInfo(app.pkg) }
-                else -> Action(Icons.Rounded.Block, "Turn off", "Hidden and stopped until turned on again") {
+                !app.enabled -> Action(Sym.CheckCircle, "Turn on") { if (hone.full) shell("enable", "${app.label} turned on") else hone.openAppInfo(app.pkg) }
+                else -> Action(Sym.Block, "Turn off", "Hidden and stopped until turned on again") {
                     if (hone.full) ask = Triple("disable", "Turn off ${app.label}?", "It disappears from the launcher and stops running. Turn it on again here any time.")
                     else hone.openAppInfo(app.pkg)
                 }
             }
             if (!self && app.enabled && !app.archived) {
-                if (app.bgRestricted) Action(Icons.Rounded.PlayCircle, "Allow background", "Let it run when you are not using it") {
+                if (app.bgRestricted) Action(Sym.PlayCircle, "Allow background", "Let it run when you are not using it") {
                     if (hone.full) shell("bg-allow", "${app.label} may run in the background") else hone.openAppInfo(app.pkg)
-                } else Action(Icons.Rounded.Bedtime, "Restrict background", "Stops it running when you are not using it; notifications may come late") {
+                } else Action(Sym.Bedtime, "Restrict background", "Stops it running when you are not using it; notifications may come late") {
                     if (hone.full) shell("bg-restrict", "${app.label} restricted in the background") else hone.openAppInfo(app.pkg)
                 }
-                if (app.running || !hone.full) Action(Icons.Rounded.StopCircle, "Force stop", "Closes it now; it may start again later") {
+                if (app.running || !hone.full) Action(Sym.StopCircle, "Force stop", "Closes it now; it may start again later") {
                     if (hone.full) shell("force-stop", "${app.label} stopped") else hone.openAppInfo(app.pkg)
                 }
             }
             if (Build.VERSION.SDK_INT >= 35 && !self) {
-                if (app.archived) Action(Icons.Rounded.Unarchive, "Restore from archive", "Downloads the app again, data kept") {
+                if (app.archived) Action(Sym.Unarchive, "Restore from archive", "Downloads the app again, data kept") {
                     if (hone.full) shell("unarchive", "Restoring ${app.label}") else hone.openAppInfo(app.pkg)
-                } else Action(Icons.Rounded.Archive, "Archive", "Removes the app, keeps its data and icon") {
+                } else Action(Sym.Archive, "Archive", "Removes the app, keeps its data and icon") {
                     if (hone.full) ask = Triple("archive", "Archive ${app.label}?", "The app is removed but its data and icon stay. Tap the icon to download it again.")
                     else hone.openAppInfo(app.pkg)
                 }
             }
-            Action(Icons.Rounded.Delete, "Uninstall", tint = cs.error) {
+            Action(Sym.Delete, "Uninstall", tint = cs.error) {
                 if (hone.full && !self) ask = Triple("uninstall", "Uninstall ${app.label}?", "The app and all its data are removed.")
                 else context.startActivity(Intent(Intent.ACTION_DELETE, android.net.Uri.parse("package:${app.pkg}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             }

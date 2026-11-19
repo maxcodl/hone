@@ -23,15 +23,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.BatteryChargingFull
-import androidx.compose.material.icons.rounded.BatteryStd
-import androidx.compose.material.icons.rounded.DeveloperBoard
-import androidx.compose.material.icons.rounded.ErrorOutline
-import androidx.compose.material.icons.rounded.Memory
-import androidx.compose.material.icons.rounded.Thermostat
-import androidx.compose.material.icons.rounded.Timeline
-import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledTonalButton
@@ -170,7 +161,7 @@ fun HealthScreen(hone: Hone, pad: PaddingValues, say: (String) -> Unit, goTo: (I
 
         item(key = "cores") {
             SectionCard(Modifier.enter(3)) {
-                CardHeader(Icons.Rounded.DeveloperBoard, "${h.cpus.size} cores", if (hone.full) "How busy each core is, live" else "Clock speed of each core, live", MaterialShapes.Square)
+                CardHeader(Sym.Board, "${h.cpus.size} cores", if (hone.full) "How busy each core is, live" else "Clock speed of each core, live", MaterialShapes.Square)
                 Equalizer(h.cpus.map { if (hone.full) (it.busy / 100).toFloat() else it.cur.toFloat() / it.max.coerceAtLeast(1) }, Modifier.fillMaxWidth().height(110.dp), cs.primary, cs.surfaceContainerHighest)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     h.cpus.forEach { c ->
@@ -188,7 +179,7 @@ fun HealthScreen(hone: Hone, pad: PaddingValues, say: (String) -> Unit, goTo: (I
             SectionCard(Modifier.enter(4)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Ring((h.battery.level / 100).toFloat(), Modifier.size(84.dp), 10.dp, listOf(cs.tertiary, cs.primary), cs.surfaceContainerHighest) {
-                        Icon(if (h.battery.charging) Icons.Rounded.BatteryChargingFull else Icons.Rounded.BatteryStd, null, tint = cs.primary)
+                        Icon(if (h.battery.charging) Sym.BatteryCharging else Sym.Battery, null, tint = cs.primary)
                     }
                     Spacer(Modifier.width(18.dp))
                     Column {
@@ -212,7 +203,7 @@ fun HealthScreen(hone: Hone, pad: PaddingValues, say: (String) -> Unit, goTo: (I
 
         item(key = "heat") {
             SectionCard(Modifier.enter(5)) {
-                CardHeader(Icons.Rounded.Thermostat, "Heat", thermalText(h.thermalStatus), MaterialShapes.Sunny)
+                CardHeader(Sym.Thermostat, "Heat", thermalText(h.thermalStatus), MaterialShapes.Sunny)
                 mergeChips(h.temps).sortedByDescending { it.celsius }.forEach { t ->
                     val limit = if (t.name == "BATTERY" || t.name == "SKIN") 45.0 else 75.0
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -232,7 +223,7 @@ fun HealthScreen(hone: Hone, pad: PaddingValues, say: (String) -> Unit, goTo: (I
 
         item(key = "system") {
             SectionCard(Modifier.enter(6)) {
-                CardHeader(Icons.Rounded.Timeline, "System", null, MaterialShapes.Gem)
+                CardHeader(Sym.Timeline, "System", null, MaterialShapes.Gem)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Pill("Up ${duration(h.uptime)}")
                     Pill("Swap ${bytes(h.memory.swapTotal - h.memory.swapFree)} / ${bytes(h.memory.swapTotal)}")
@@ -244,7 +235,7 @@ fun HealthScreen(hone: Hone, pad: PaddingValues, say: (String) -> Unit, goTo: (I
 
         if (h.processes.isNotEmpty()) item(key = "procs") {
             SectionCard(Modifier.enter(7)) {
-                CardHeader(Icons.Rounded.Memory, "Busiest right now", "Share of the whole CPU", MaterialShapes.Cookie6Sided)
+                CardHeader(Sym.Memory, "Busiest right now", "Share of the whole CPU", MaterialShapes.Cookie6Sided)
                 val busy = h.processes.filter { it.name != "libhone.so" && it.name != "hone" && it.rss > 0 }
                 if (busy.none { it.cpu >= 2.0 }) {
                     RowLabel("Nothing busy, the phone is idle")
@@ -284,7 +275,7 @@ private fun FindingCard(f: Finding, act: (String) -> Unit, modifier: Modifier) {
     SectionCard(modifier, container = if (bad) cs.errorContainer else cs.tertiaryContainer) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             ShapeIcon(
-                if (bad) Icons.Rounded.ErrorOutline else Icons.Rounded.WarningAmber,
+                if (bad) Sym.Error else Sym.Warning,
                 MaterialShapes.Burst,
                 container = if (bad) cs.error else cs.tertiary,
                 content = if (bad) cs.onError else cs.onTertiary,

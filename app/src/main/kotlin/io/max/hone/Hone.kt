@@ -64,11 +64,12 @@ import kotlin.coroutines.resume
     val slow: List<String> = emptyList(),
     val compiling: String? = null,
     val status: Map<String, String> = emptyMap(),
+    val jobRunning: Boolean = false,
 )
 @Serializable data class Freed(val freed: Long = 0, val free: Long = 0, val available: Long = 0)
 @Serializable data class Pkg(val pkg: String, val tag: String, val note: String, val state: String)
 @Serializable data class Pkgs(val packages: List<Pkg> = emptyList())
-@Serializable data class Changed(val ok: Boolean = false, val output: String = "", val status: String = "")
+@Serializable data class Changed(val ok: Boolean = false, val output: String = "", val status: String = "", val why: String = "")
 @Serializable data class Compiled(val results: List<Changed> = emptyList())
 @Serializable data class CacheResult(val cleared: Int = 0, val failed: Int = 0, val stuck: Boolean = false, val error: String? = null)
 
@@ -440,14 +441,17 @@ class Hone(private val context: Context) {
     var runStartFast by mutableStateOf(0)
         private set
 
+    /** Apps the running job has worked on; most are re-compiles of apps already fast, with fresh usage data. */
+    val processedRun = androidx.compose.runtime.mutableStateListOf<String>()
+
     fun fastCount(d: Dexopt?) = d?.counts?.filterKeys { it in setOf("speed-profile", "speed", "everything") }?.values?.sum() ?: 0
 
     /** Apps a full compile did not take on (broken install, no code); remembered per version, not retried. */
-    val failedCompile = androidx.compose.runtime.mutableStateListOf<String>().apply {
-        val saved = prefs.getStringSet("cantCompile", emptySet()).orEmpty()
-        saved.forEach { entry ->
-            val (pkg, ver) = entry.substringBefore('@') to entry.substringAfter('@').toLongOrNull()
-            if (ver != null && versionOf(pkg) == ver) add(pkg)
+    val failedCompile = androidx.compose.runtime.mutableStateMapOf<String, String>().apply {
+        prefs.getStringSet("cantCompile", emptySet()).orEmpty().forEach { entry ->
+            val pkg = entry.substringBefore('@')
+            val ver = entry.substringAfter('@').substringBefore('#').toLongOrNull()
+            if (ver != null && versionOf(pkg) == ver) put(pkg, entry.substringAfter('#', "other"))
         }
     }
 
@@ -456,9 +460,9 @@ class Hone(private val context: Context) {
         if (android.os.Build.VERSION.SDK_INT >= 28) pi.longVersionCode else @Suppress("DEPRECATION") pi.versionCode.toLong()
     }.getOrNull()
 
-    private fun rememberCantCompile(pkg: String) {
-        if (pkg !in failedCompile) failedCompile.add(pkg)
-        val entries = failedCompile.mapNotNull { p -> versionOf(p)?.let { "$p@$it" } }.toSet()
+    private fun rememberCantCompile(pkg: String, why: String) {
+        failedCompile[pkg] = why.ifEmpty { "other" }
+        val entries = failedCompile.mapNotNull { (p, w) -> versionOf(p)?.let { "$p@$it#$w" } }.toSet()
         prefs.edit().putStringSet("cantCompile", entries).apply()
     }
 
@@ -469,7 +473,7 @@ class Hone(private val context: Context) {
     /** Full compile of one app; on success the counts and list update at once, without a 15-second rescan. */
     suspend fun compile(pkg: String): Changed {
         val r = call<Compiled>("compile", "speed", pkg).results.firstOrNull() ?: Changed(false, "no answer")
-        if (!r.ok) rememberCantCompile(pkg)
+        if (!r.ok) rememberCantCompile(pkg, r.why)
         val d = dexopt
         if (r.ok && d != null) {
             val old = d.status[pkg]
@@ -483,27 +487,61 @@ class Hone(private val context: Context) {
 
     fun refreshDexopt() = scope.launch { dexopt = runCatching { call<Dexopt>("dexopt") }.getOrNull() ?: dexopt }
 
-    fun optimize() {
+    /** What the last finished run did, so a run that ends while you are away still says so. */
+    var lastRun by mutableStateOf<String?>(null)
+        private set
+    var batchDone by mutableStateOf(0)
+        private set
+    var batchTotal by mutableStateOf(0)
+        private set
+    private var batchJob: kotlinx.coroutines.Job? = null
+
+    /** Basic apps a full compile can still help: not debug builds, not already known to fail. */
+    fun compilable(): List<String> = dexopt?.slow.orEmpty().filter { it !in failedCompile && !isDebuggable(it) }
+
+    /**
+     * Fully compiles every remaining basic app, one at a time, so the count really moves. Android's own
+     * optimiser only refreshes apps that already have usage data and leaves the rest basic.
+     */
+    fun optimizeAll() {
         if (optimizing) return
-        optimizing = true
-        val watcher = scope.launch {
-            if (dexopt == null) dexopt = runCatching { call<Dexopt>("dexopt") }.getOrNull()
-            runStartFast = fastCount(dexopt)
-            var tick = 0
-            while (true) {
-                compilingNow = runCatching { call<Dexopt>("compiling").compiling }.getOrNull()
-                // The full state takes about two seconds to read; every sixth second keeps the ring honest.
-                if (tick++ % 6 == 5) runCatching { call<Dexopt>("dexopt") }.onSuccess { dexopt = it }
-                delay(1000)
-            }
+        val queue = compilable()
+        if (queue.isEmpty()) {
+            lastRun = "Nothing left that can be compiled"
+            return
         }
-        scope.launch {
-            runCatching { dexopt = call<Dexopt>("optimize") }
-            watcher.cancel()
-            compilingNow = null
-            optimizing = false
+        optimizing = true
+        batchTotal = queue.size
+        batchDone = 0
+        processedRun.clear()
+        runStartFast = fastCount(dexopt)
+        val started = System.currentTimeMillis()
+        batchJob = scope.launch {
+            try {
+                for (pkg in queue) {
+                    compilingNow = pkg
+                    runCatching { compile(pkg) }
+                    processedRun.add(pkg)
+                    batchDone++
+                }
+            } finally {
+                compilingNow = null
+                val mins = ((System.currentTimeMillis() - started) / 60_000).coerceAtLeast(1)
+                lastRun = "Last run took $mins min: ${processedRun.size} apps processed, ${(fastCount(dexopt) - runStartFast).coerceAtLeast(0)} newly compiled"
+                batchTotal = 0
+                optimizing = false
+            }
         }
     }
 
-    fun cancelOptimize() = scope.launch { runCatching { raw("optimize-cancel") } }
+    fun cancelOptimize() {
+        batchJob?.cancel()
+    }
+
+    companion object {
+        @Volatile private var instance: Hone? = null
+
+        fun get(context: Context): Hone =
+            instance ?: synchronized(this) { instance ?: Hone(context.applicationContext).also { instance = it } }
+    }
 }

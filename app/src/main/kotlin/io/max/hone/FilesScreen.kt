@@ -26,25 +26,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
-import androidx.compose.material.icons.rounded.Android
-import androidx.compose.material.icons.rounded.Archive
-import androidx.compose.material.icons.rounded.AudioFile
-import androidx.compose.material.icons.rounded.ContentCopy
-import androidx.compose.material.icons.rounded.Delete
-import androidx.compose.material.icons.rounded.Description
-import androidx.compose.material.icons.rounded.Folder
-import androidx.compose.material.icons.rounded.FolderOff
-import androidx.compose.material.icons.rounded.Image
-import androidx.compose.material.icons.rounded.InsertDriveFile
-import androidx.compose.material.icons.rounded.Lock
-import androidx.compose.material.icons.rounded.Restore
-import androidx.compose.material.icons.rounded.Schedule
-import androidx.compose.material.icons.rounded.SdStorage
-import androidx.compose.material.icons.rounded.VideoFile
-import androidx.compose.material.icons.rounded.Widgets
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
@@ -112,7 +93,7 @@ fun FilesScreen(hone: Hone, pad: PaddingValues, say: (String) -> Unit) {
         LazyColumn(contentPadding = pad + 16.dp, verticalArrangement = Arrangement.spacedBy(14.dp)) {
             item {
                 SectionCard(Modifier.enter(0)) {
-                    CardHeader(Icons.Rounded.SdStorage, "Allow all files access", "Hone needs it to measure folders and move unwanted files to its trash. Turn it on for Hone, then come back.", MaterialShapes.Clover4Leaf)
+                    CardHeader(Sym.SdCard, "Allow all files access", "Hone needs it to measure folders and move unwanted files to its trash. Turn it on for Hone, then come back.", MaterialShapes.Clover4Leaf)
                     Button(onClick = { hone.openFilesAccess() }, shapes = ButtonDefaults.shapes(), modifier = Modifier.align(Alignment.End)) { Text("Open settings") }
                 }
             }
@@ -190,7 +171,7 @@ private fun Overview(hone: Hone, pad: PaddingValues, say: (String) -> Unit, open
                             }
                             if (g.count > 0) {
                                 Text(bytes(g.bytes), style = MaterialTheme.typography.titleSmall, color = cs.primary)
-                                Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null, tint = cs.onSurfaceVariant)
+                                Icon(Sym.ChevronRight, null, tint = cs.onSurfaceVariant)
                             }
                         }
                     }
@@ -199,14 +180,14 @@ private fun Overview(hone: Hone, pad: PaddingValues, say: (String) -> Unit, open
             item(key = "trash") {
                 RowCard(Modifier.enter(8).clickable { open(Page.Trash) }) {
                     Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                        ShapeIcon(Icons.Rounded.Delete, MaterialShapes.Arch, size = 44.dp)
+                        ShapeIcon(Sym.Delete, MaterialShapes.Arch, size = 44.dp)
                         Spacer(Modifier.width(14.dp))
                         Column(Modifier.weight(1f)) {
                             Text("Hone trash", style = MaterialTheme.typography.titleMedium)
                             Text("Removed files wait here until you empty it", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
                         }
                         Text(bytes(scan.trash), style = MaterialTheme.typography.titleSmall, color = cs.primary)
-                        Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null, tint = cs.onSurfaceVariant)
+                        Icon(Sym.ChevronRight, null, tint = cs.onSurfaceVariant)
                     }
                 }
             }
@@ -258,7 +239,7 @@ private fun GroupPage(hone: Hone, pad: PaddingValues, id: String, say: (String) 
             item(key = "head") {
                 SectionCard {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        IconButton(onClick = back) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back") }
+                        IconButton(onClick = back) { Icon(Sym.ArrowBack, "Back") }
                         Spacer(Modifier.width(4.dp))
                         Column(Modifier.weight(1f)) {
                             Text(group.title, style = MaterialTheme.typography.titleLarge)
@@ -316,7 +297,7 @@ private fun BrowsePage(hone: Hone, pad: PaddingValues, path: String, say: (Strin
             item(key = "head") {
                 SectionCard {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        IconButton(onClick = up) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Up") }
+                        IconButton(onClick = up) { Icon(Sym.ArrowBack, "Up") }
                         Spacer(Modifier.width(4.dp))
                         Column(Modifier.weight(1f)) {
                             Text(if (path == ROOT) "Internal storage" else if (path.count { it == '/' } == 2) "SD card" else path.substringAfterLast('/'), style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -371,7 +352,7 @@ private fun TrashPage(hone: Hone, pad: PaddingValues, say: (String) -> Unit, bac
         item {
             SectionCard {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = back) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back") }
+                    IconButton(onClick = back) { Icon(Sym.ArrowBack, "Back") }
                     Spacer(Modifier.width(4.dp))
                     Column(Modifier.weight(1f)) {
                         Text("Hone trash", style = MaterialTheme.typography.titleLarge)
@@ -392,7 +373,7 @@ private fun TrashPage(hone: Hone, pad: PaddingValues, say: (String) -> Unit, bac
                         },
                         enabled = chosen.isNotEmpty(), shapes = ButtonDefaults.shapes(),
                     ) {
-                        Icon(Icons.Rounded.Restore, null, Modifier.size(18.dp))
+                        Icon(Sym.Restore, null, Modifier.size(18.dp))
                         Spacer(Modifier.width(6.dp))
                         Text("Restore ${chosen.size}")
                     }
@@ -491,7 +472,7 @@ private fun FileRow(
         Row(Modifier.padding(start = 14.dp, end = 6.dp, top = 10.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
             if (dir) {
                 Box(Modifier.size(44.dp).clip(CircleShape).background(cs.surfaceContainerHighest), contentAlignment = Alignment.Center) {
-                    Icon(Icons.Rounded.Folder, null, Modifier.size(22.dp), tint = cs.onSurfaceVariant)
+                    Icon(Sym.Folder, null, Modifier.size(22.dp), tint = cs.onSurfaceVariant)
                 }
             } else {
                 FileThumb(path, fileIcon(name), 44.dp)
@@ -510,7 +491,7 @@ private fun FileRow(
                 )
             }
             when {
-                locked -> Icon(Icons.Rounded.Lock, "Protected", Modifier.padding(12.dp).size(18.dp), tint = cs.outline)
+                locked -> Icon(Sym.Lock, "Protected", Modifier.padding(12.dp).size(18.dp), tint = cs.outline)
                 selected != null && onToggle != null -> Checkbox(checked = selected, onCheckedChange = { onToggle() })
             }
         }
@@ -525,7 +506,7 @@ private fun SectionHeader(title: String, count: Int, size: Long, open: Boolean, 
     RowCard(Modifier.clickable(onClick = onOpen)) {
         Row(Modifier.padding(start = 16.dp, end = 6.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(
-                Icons.AutoMirrored.Rounded.KeyboardArrowRight, if (open) "Fold" else "Unfold",
+                Sym.ChevronRight, if (open) "Fold" else "Unfold",
                 Modifier.size(24.dp).graphicsLayer { rotationZ = turn }, tint = cs.onSurfaceVariant,
             )
             Spacer(Modifier.width(12.dp))
@@ -576,23 +557,23 @@ private fun categoryColors(): Map<String, Color> {
 }
 
 private fun groupIcon(id: String): ImageVector = when (id) {
-    "apks" -> Icons.Rounded.Android
-    "wabackups" -> Icons.Rounded.Restore
-    "dupes" -> Icons.Rounded.ContentCopy
-    "leftovers" -> Icons.Rounded.Widgets
-    "temp" -> Icons.Rounded.Schedule
-    "large" -> Icons.Rounded.SdStorage
-    else -> Icons.Rounded.FolderOff
+    "apks" -> Sym.Android
+    "wabackups" -> Sym.Restore
+    "dupes" -> Sym.Copy
+    "leftovers" -> Sym.Widgets
+    "temp" -> Sym.Schedule
+    "large" -> Sym.SdCard
+    else -> Sym.FolderOff
 }
 
 private fun fileIcon(name: String): ImageVector = when (name.substringAfterLast('.', "").lowercase()) {
-    "jpg", "jpeg", "png", "webp", "heic", "gif", "dng" -> Icons.Rounded.Image
-    "mp4", "mkv", "mov", "webm", "3gp" -> Icons.Rounded.VideoFile
-    "mp3", "m4a", "flac", "wav", "ogg", "opus" -> Icons.Rounded.AudioFile
-    "pdf", "doc", "docx", "txt", "xls", "xlsx" -> Icons.Rounded.Description
-    "zip", "rar", "7z", "tar", "gz" -> Icons.Rounded.Archive
-    "apk", "apks", "xapk" -> Icons.Rounded.Android
-    else -> Icons.Rounded.InsertDriveFile
+    "jpg", "jpeg", "png", "webp", "heic", "gif", "dng" -> Sym.Image
+    "mp4", "mkv", "mov", "webm", "3gp" -> Sym.VideoFile
+    "mp3", "m4a", "flac", "wav", "ogg", "opus" -> Sym.AudioFile
+    "pdf", "doc", "docx", "txt", "xls", "xlsx" -> Sym.Description
+    "zip", "rar", "7z", "tar", "gz" -> Sym.Archive
+    "apk", "apks", "xapk" -> Sym.Android
+    else -> Sym.File
 }
 
 private val dateFormat = SimpleDateFormat("d MMM yyyy", Locale.getDefault())

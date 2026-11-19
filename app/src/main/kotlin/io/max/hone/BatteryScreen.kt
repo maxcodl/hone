@@ -24,15 +24,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Add
-import androidx.compose.material.icons.rounded.BatteryChargingFull
-import androidx.compose.material.icons.rounded.BatteryStd
-import androidx.compose.material.icons.rounded.Bolt
-import androidx.compose.material.icons.rounded.History
-import androidx.compose.material.icons.rounded.NotificationsActive
-import androidx.compose.material.icons.rounded.Power
-import androidx.compose.material.icons.rounded.Remove
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
@@ -123,7 +114,7 @@ fun BatteryScreen(hone: Hone, pad: PaddingValues, say: (String) -> Unit) {
         item(key = "hero") {
             HeroCard(MaterialShapes.Pill, MaterialShapes.Cookie9Sided, Modifier.enter(0)) {
                 Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Icon(if (now.charging) Icons.Rounded.BatteryChargingFull else Icons.Rounded.BatteryStd, null, Modifier.size(40.dp), tint = cs.onPrimaryContainer)
+                    Icon(if (now.charging) Sym.BatteryCharging else Sym.Battery, null, Modifier.size(40.dp), tint = cs.onPrimaryContainer)
                     BigValue(healthWord, MaterialTheme.typography.displayMediumEmphasized, color = cs.onPrimaryContainer)
                     RowLabel("Battery health")
                     val pct = info?.healthPercent
@@ -139,7 +130,7 @@ fun BatteryScreen(hone: Hone, pad: PaddingValues, say: (String) -> Unit) {
         item(key = "row1") {
             Row(Modifier.height(IntrinsicSize.Min).enter(1), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                 Tile("Status", if (now.charging) (if (now.status == BatteryManager.BATTERY_STATUS_FULL) "Full" else "Charging") else "On battery", Modifier.weight(1f).fillMaxHeight()) {
-                    Icon(if (now.charging) Icons.Rounded.Bolt else Icons.Rounded.BatteryStd, null, Modifier.size(28.dp), tint = cs.primary)
+                    Icon(if (now.charging) Sym.Bolt else Sym.Battery, null, Modifier.size(28.dp), tint = cs.primary)
                 }
                 Tile("Level", "${now.level}%", Modifier.weight(1f).fillMaxHeight()) {
                     GradientBar(now.level / 100f, listOf(cs.tertiary, if (now.level <= 15) cs.error else cs.primary), cs.surfaceContainerHighest)
@@ -149,7 +140,7 @@ fun BatteryScreen(hone: Hone, pad: PaddingValues, say: (String) -> Unit) {
         item(key = "row2") {
             Row(Modifier.height(IntrinsicSize.Min).enter(2), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                 Tile("Source", source, Modifier.weight(1f).fillMaxHeight()) {
-                    Icon(Icons.Rounded.Power, null, Modifier.size(28.dp), tint = cs.primary)
+                    Icon(Sym.Power, null, Modifier.size(28.dp), tint = cs.primary)
                 }
                 Tile("Cycles", cycles?.toString() ?: "Hidden", Modifier.weight(1f).fillMaxHeight()) {
                     Text(if (cycles == null) "This phone does not share it" else "Full charges so far", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
@@ -165,7 +156,7 @@ fun BatteryScreen(hone: Hone, pad: PaddingValues, say: (String) -> Unit) {
         }
         item(key = "current") {
             SectionCard(Modifier.enter(4)) {
-                CardHeader(Icons.Rounded.Bolt, "Current", if (now.charging) "Flowing into the battery" else "Being drawn from the battery", MaterialShapes.Burst)
+                CardHeader(Sym.Bolt, "Current", if (now.charging) "Flowing into the battery" else "Being drawn from the battery", MaterialShapes.Burst)
                 Row(verticalAlignment = Alignment.Bottom) {
                     BigValue("${abs(now.ma)} mA", MaterialTheme.typography.headlineMediumEmphasized)
                     Spacer(Modifier.width(12.dp))
@@ -286,12 +277,12 @@ private fun AlertRow(
             FilledTonalIconButton(
                 onClick = { onChange(setting.copy(value = (setting.value - step).coerceIn(range))) },
                 shapes = IconButtonDefaults.shapes(),
-            ) { Icon(Icons.Rounded.Remove, "Lower") }
+            ) { Icon(Sym.Remove, "Lower") }
             Text("${fmt(setting.value, 0)}$unit", style = MaterialTheme.typography.titleMedium)
             FilledTonalIconButton(
                 onClick = { onChange(setting.copy(value = (setting.value + step).coerceIn(range))) },
                 shapes = IconButtonDefaults.shapes(),
-            ) { Icon(Icons.Rounded.Add, "Higher") }
+            ) { Icon(Sym.Add, "Higher") }
         }
     }
 }

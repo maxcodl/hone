@@ -19,7 +19,17 @@ fn main() {
         "health" => health(),
         "live" => live(),
         "dexopt" => dexopt(),
-        "compiling" => json!({ "compiling": compiling() }),
+        "compiling" => json!({ "compiling": compiling(), "jobRunning": job_running() }),
+        // Detached: its own session, so it keeps going when Hone or its shell connection goes away.
+        "optimize-start" => {
+            let r = Command::new("setsid")
+                .args(["cmd", "package", "bg-dexopt-job"])
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn();
+            json!({ "ok": r.is_ok() })
+        }
         "packages" => packages(),
         // The safe list alone, for the app to match against its own package list when there is no shell.
         "tags" => json!({ "packages": debloat::LIST.iter().map(|(p, t, n)| json!({ "pkg": p, "tag": t, "note": n, "state": "unknown" })).collect::<Vec<_>>() }),
@@ -374,6 +384,16 @@ fn dexopt_scan() -> BTreeMap<String, String> {
     out
 }
 
+/// Whether Android's optimisation job started from a shell is still running.
+fn job_running() -> bool {
+    let Ok(dir) = fs::read_dir("/proc") else { return false };
+    dir.flatten().any(|e| {
+        let raw = fs::read(e.path().join("cmdline")).unwrap_or_default();
+        let line = String::from_utf8_lossy(&raw).replace('\0', " ");
+        line.contains("bg-dexopt-job") && !line.contains("--cancel") && !line.contains("libhone")
+    })
+}
+
 /// The app dex2oat is compiling right now, from its command line.
 fn compiling() -> Option<String> {
     for e in fs::read_dir("/proc").ok()?.flatten() {
@@ -419,7 +439,17 @@ fn compile(rest: &[String]) -> Value {
             let dump = run("cmd", &["package", "art", "dump", p]);
             let status = dump.find("[status=").map(|i| dump[i + 8..].split(']').next().unwrap_or("").to_string()).unwrap_or_default();
             let fast = matches!(status.as_str(), "speed" | "speed-profile" | "everything");
-            json!({ "pkg": p, "ok": out.contains("Success") && fast, "status": status, "output": out })
+            let reason = dump.find("[reason=").map(|i| dump[i + 8..].split(']').next().unwrap_or("").to_string()).unwrap_or_default();
+            let why = if fast {
+                ""
+            } else if out.contains("Failure") || dump.contains("location is error") {
+                "rejected"
+            } else if reason == "vdex-dm" {
+                "play"
+            } else {
+                "other"
+            };
+            json!({ "pkg": p, "ok": out.contains("Success") && fast, "status": status, "why": why, "output": out })
         })
         .collect();
     json!({ "results": results })

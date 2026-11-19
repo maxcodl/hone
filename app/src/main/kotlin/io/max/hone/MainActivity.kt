@@ -38,21 +38,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Apps
-import androidx.compose.material.icons.outlined.Folder
-import androidx.compose.material.icons.rounded.Folder
-import androidx.compose.material.icons.outlined.MonitorHeart
-import androidx.compose.material.icons.outlined.Speed
-import androidx.compose.material.icons.outlined.Storage
-import androidx.compose.material.icons.rounded.Apps
-import androidx.compose.material.icons.rounded.BatteryChargingFull
-import androidx.compose.material.icons.rounded.Bolt
-import androidx.compose.material.icons.rounded.Key
-import androidx.compose.material.icons.rounded.MonitorHeart
-import androidx.compose.material.icons.rounded.Palette
-import androidx.compose.material.icons.rounded.Speed
-import androidx.compose.material.icons.rounded.Storage
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -98,7 +83,7 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
-    private val hone by lazy { Hone(applicationContext) }
+    private val hone by lazy { Hone.get(applicationContext) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -110,12 +95,12 @@ class MainActivity : ComponentActivity() {
 private data class Tab(val title: String, val icon: ImageVector, val outline: ImageVector)
 
 private val tabs = listOf(
-    Tab("Health", Icons.Rounded.MonitorHeart, Icons.Outlined.MonitorHeart),
-    Tab("Battery", Icons.Rounded.BatteryChargingFull, Icons.Rounded.BatteryChargingFull),
-    Tab("Storage", Icons.Rounded.Storage, Icons.Outlined.Storage),
-    Tab("Files", Icons.Rounded.Folder, Icons.Outlined.Folder),
-    Tab("Speed", Icons.Rounded.Speed, Icons.Outlined.Speed),
-    Tab("Apps", Icons.Rounded.Apps, Icons.Outlined.Apps),
+    Tab("Health", Sym.MonitorHeart, Sym.MonitorHeart),
+    Tab("Battery", Sym.BatteryCharging, Sym.BatteryCharging),
+    Tab("Storage", Sym.Storage, Sym.Storage),
+    Tab("Files", Sym.Folder, Sym.Folder),
+    Tab("Speed", Sym.Speed, Sym.Speed),
+    Tab("Apps", Sym.Apps, Sym.Apps),
 )
 
 /** Asks for Shizuku: the permission when it runs, otherwise opens it. */
@@ -144,23 +129,23 @@ fun App(hone: Hone) {
         topBar = {
             if (look.mono) DotHeader(tabs[tab].title, if (hone.full) hone.deviceName else "${hone.deviceName}  ·  without Shizuku") {
                 if (!hone.full) TextButton(onClick = { hone.connect() }) {
-                    Icon(Icons.Rounded.Bolt, null, Modifier.size(18.dp))
+                    Icon(Sym.Bolt, null, Modifier.size(18.dp))
                     Spacer(Modifier.width(4.dp))
                     Text("CONNECT", style = MaterialTheme.typography.labelLarge)
                 }
-                IconButton(onClick = { showLook = true }) { Icon(Icons.Rounded.Palette, "Look") }
+                IconButton(onClick = { showLook = true }) { Icon(Sym.Palette, "Look") }
             } else LargeFlexibleTopAppBar(
                 title = { Text(if (look.mono) tabs[tab].title.uppercase() else tabs[tab].title) },
                 subtitle = { Text(if (hone.full) hone.deviceName else "${hone.deviceName}  ·  without Shizuku", maxLines = 1) },
                 actions = {
                     if (!hone.full) {
                         TextButton(onClick = { hone.connect() }, shapes = ButtonDefaults.shapes()) {
-                            Icon(Icons.Rounded.Bolt, null, Modifier.size(18.dp))
+                            Icon(Sym.Bolt, null, Modifier.size(18.dp))
                             Spacer(Modifier.width(4.dp))
                             Text("Connect Shizuku")
                         }
                     }
-                    IconButton(onClick = { showLook = true }, shapes = IconButtonDefaults.shapes()) { Icon(Icons.Rounded.Palette, "Look") }
+                    IconButton(onClick = { showLook = true }, shapes = IconButtonDefaults.shapes()) { Icon(Sym.Palette, "Look") }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = cs.surface, scrolledContainerColor = if (look.amoled) Color.Black else cs.surfaceContainer),
                 scrollBehavior = scroll,
@@ -257,7 +242,7 @@ private fun DotNav(selected: Int, onSelect: (Int) -> Unit) {
 @Composable
 fun NeedsShizuku(hone: Hone, title: String, text: String, modifier: Modifier = Modifier) {
     SectionCard(modifier) {
-        CardHeader(Icons.Rounded.Bolt, title, text, MaterialShapes.Sunny)
+        CardHeader(Sym.Bolt, title, text, MaterialShapes.Sunny)
         FilledTonalButton(onClick = { hone.connect() }, shapes = ButtonDefaults.shapes(), modifier = Modifier.align(Alignment.End)) {
             Text(if (hone.access == Access.Ask) "Allow in Shizuku" else "Open Shizuku")
         }
@@ -329,7 +314,7 @@ private fun Gate(hone: Hone) {
             } else {
                 MorphBlob(MaterialShapes.Sunny, MaterialShapes.Cookie9Sided, Brush.linearGradient(listOf(cs.primaryContainer, cs.tertiaryContainer)), Modifier.size(160.dp))
             }
-            Icon(if (running) Icons.Rounded.Key else Icons.Rounded.Bolt, null, Modifier.size(56.dp), tint = cs.onSurface)
+            Icon(if (running) Sym.Key else Sym.Bolt, null, Modifier.size(56.dp), tint = cs.onSurface)
         }
         Spacer(Modifier.size(32.dp))
         BigValue("Hone", MaterialTheme.typography.displayMediumEmphasized)
