@@ -563,6 +563,19 @@ class Hone(private val context: Context) {
 
     private val labels = HashMap<String, String>()
 
+    /**
+     * Android keeps the record of a use after the permission is taken away, and the app op stays "allow",
+     * so drop camera, microphone and location uses whose permission is gone. Clipboard is filtered by the engine.
+     */
+    fun stillAllowed(p: Privacy): Privacy {
+        val loc = listOf(android.Manifest.permission.ACCESS_FINE_LOCATION, android.Manifest.permission.ACCESS_COARSE_LOCATION)
+        val perms = mapOf("CAMERA" to listOf(android.Manifest.permission.CAMERA), "RECORD_AUDIO" to listOf(android.Manifest.permission.RECORD_AUDIO), "FINE_LOCATION" to loc, "COARSE_LOCATION" to loc)
+        return Privacy(p.apps.mapNotNull { a ->
+            val ops = a.ops.filter { o -> perms[o.op]?.any { pm.checkPermission(it, a.pkg) == PackageManager.PERMISSION_GRANTED } ?: true }
+            if (ops.isEmpty()) null else a.copy(ops = ops)
+        })
+    }
+
     private fun label(info: ApplicationInfo) = labels.getOrPut(info.packageName) { info.loadLabel(pm).toString() }
 
     fun label(pkg: String): String = labels.getOrPut(pkg) {

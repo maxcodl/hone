@@ -195,17 +195,24 @@ const PRIVACY_OPS: &[&str] = &["CAMERA", "RECORD_AUDIO", "FINE_LOCATION", "COARS
 fn parse_appops_access(text: &str) -> HashMap<String, u64> {
     let mut out: HashMap<String, u64> = HashMap::new();
     let mut pkg: Option<String> = None;
+    // Access already taken away still shows its past use; skip it so the list holds only what can still happen.
+    let mut blocked = false;
     for l in text.lines() {
         let t = l.trim();
         if let Some(p) = t.strip_prefix("Package ").and_then(|p| p.strip_suffix(':')) {
             pkg = Some(p.to_string());
+            blocked = false;
             continue;
         }
         if t.starts_with("Uid ") {
             pkg = None;
             continue;
         }
-        let (Some(p), true) = (&pkg, t.starts_with("Access:")) else { continue };
+        if let Some(mode) = t.split_once(" (").filter(|(op, _)| op.chars().all(|c| c.is_ascii_uppercase() || c == '_')).map(|(_, m)| m) {
+            blocked = ["ignore)", "deny)", "errored)"].iter().any(|b| mode.starts_with(b));
+            continue;
+        }
+        let (Some(p), true, false) = (&pkg, t.starts_with("Access:"), blocked) else { continue };
         let Some(ago) = t.split("(-").nth(1).and_then(|r| r.split(')').next()) else { continue };
         let ms = parse_duration(ago);
         let e = out.entry(p.clone()).or_insert(u64::MAX);
@@ -536,6 +543,26 @@ mod tests {
         let a = parse_appops_access(text);
         assert_eq!(a["com.foo"], 3_600_000);
         assert!(!a.contains_key("com.bar"), "a rejected attempt is not a use");
+    }
+
+    #[test]
+    fn skips_access_already_taken_away() {
+        let text = "\
+  Uid u0a311:
+    Package com.vivaldi.browser:
+      READ_CLIPBOARD (ignore):
+        null=[
+          Access: [top-s] 2026-11-20 01:29:55.030 (-15h46m18s352ms)
+        ]
+  Uid u0a312:
+    Package com.bt.bms:
+      READ_CLIPBOARD (allow):
+        null=[
+          Access: [top-s] 2026-11-11 11:23:56.522 (-1h0m0s0ms)
+        ]";
+        let a = parse_appops_access(text);
+        assert!(!a.contains_key("com.vivaldi.browser"));
+        assert_eq!(a["com.bt.bms"], 3_600_000);
     }
 
     #[test]

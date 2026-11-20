@@ -65,7 +65,7 @@ fun AppsScreen(hone: Hone, pad: PaddingValues, say: (String) -> Unit) {
     var revoke by remember { mutableStateOf<Pair<PrivacyApp, String>?>(null) }
     LaunchedEffect(mode, hone.full) {
         if (!hone.full) return@LaunchedEffect
-        if (mode == 2 && privacy == null) privacy = runCatching { hone.call<Privacy>("privacy") }.onFailure { say("Could not read access records: ${it.message}") }.getOrNull() ?: Privacy()
+        if (mode == 2 && privacy == null) privacy = runCatching { hone.stillAllowed(hone.call<Privacy>("privacy")) }.onFailure { say("Could not read access records: ${it.message}") }.getOrNull() ?: Privacy()
         if (mode == 3 && boot == null) boot = runCatching { bootApps(context) }.getOrDefault(emptyList())
     }
     revoke?.let { (app, op) ->
@@ -76,7 +76,7 @@ fun AppsScreen(hone: Hone, pad: PaddingValues, say: (String) -> Unit) {
                 scope.launch {
                     working = app.pkg
                     val r = runCatching { hone.call<Changed>("revoke", app.pkg, op) }.getOrNull()
-                    privacy = runCatching { hone.call<Privacy>("privacy") }.getOrNull() ?: privacy
+                    privacy = runCatching { hone.stillAllowed(hone.call<Privacy>("privacy")) }.getOrNull() ?: privacy
                     working = null
                     say(if (r?.ok == true) "${hone.label(app.pkg)} no longer has $what access" else "Could not remove it: ${r?.output?.take(80).orEmpty()}")
                 }
