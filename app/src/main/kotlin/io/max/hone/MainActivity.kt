@@ -146,7 +146,7 @@ fun App(hone: Hone) {
                     }
                     IconButton(onClick = { showLook = true }, shapes = IconButtonDefaults.shapes()) { Icon(Sym.Palette, "Look") }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = cs.surface, scrolledContainerColor = if (look.amoled) Color.Black else cs.surfaceContainer),
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = cs.surface, scrolledContainerColor = if (look.amoled) cs.surface else cs.surfaceContainer),
                 scrollBehavior = scroll,
             )
         },
@@ -254,7 +254,7 @@ fun NeedsShizuku(hone: Hone, title: String, text: String, modifier: Modifier = M
 private fun LookSheet(hone: Hone, onClose: () -> Unit) {
     val current = hone.looks.look
     val cs = MaterialTheme.colorScheme
-    ModalBottomSheet(onDismissRequest = onClose, containerColor = if (current.amoled) Color.Black else cs.surfaceContainerLow) {
+    ModalBottomSheet(onDismissRequest = onClose, containerColor = sheetColor()) {
         Column(Modifier.padding(horizontal = 20.dp).navigationBarsPadding(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("Look", style = MaterialTheme.typography.headlineSmallEmphasized)
             Style.entries.forEach { s ->

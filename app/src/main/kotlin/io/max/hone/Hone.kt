@@ -71,7 +71,17 @@ import kotlin.coroutines.resume
 @Serializable data class Pkgs(val packages: List<Pkg> = emptyList())
 @Serializable data class Changed(val ok: Boolean = false, val output: String = "", val status: String = "", val why: String = "")
 @Serializable data class Compiled(val results: List<Changed> = emptyList())
-@Serializable data class CacheResult(val cleared: Int = 0, val failed: Int = 0, val stuck: Boolean = false, val error: String? = null)
+@Serializable data class CacheResult(val cleared: Int = 0, val failed: Int = 0, val stuck: Boolean = false, val error: String? = null, val unsupported: Boolean = false)
+@Serializable data class DrainApp(val pkg: String, val mah: Double = 0.0, val pct: Double = 0.0, val awakeMs: Long = 0, val wakeups: Long = 0)
+@Serializable data class Drain(val apps: List<DrainApp> = emptyList(), val totalMah: Double = 0.0, val measured: Boolean = false)
+@Serializable data class OpUse(val op: String, val agoMs: Long = 0)
+@Serializable data class PrivacyApp(val pkg: String, val ops: List<OpUse> = emptyList(), val user: Boolean = false)
+@Serializable data class Privacy(val apps: List<PrivacyApp> = emptyList())
+@Serializable data class DisplayState(val settings: Map<String, Double?> = emptyMap(), val modes: List<Double> = emptyList())
+@Serializable data class Bench(
+    val writeMBs: Double = 0.0, val readMBs: Double = 0.0, val randomIops: Double = 0.0,
+    val cpuSingle: Double = 0.0, val cpuMulti: Double = 0.0, val at: Long = 0, val error: String? = null,
+)
 
 /** What fills the phone, for the storage ring. */
 data class Breakdown(val images: Long, val video: Long, val audio: Long, val apps: Long, val other: Long, val free: Long)
@@ -281,7 +291,13 @@ class Hone(private val context: Context) {
         Breakdown(images, video, audio, appBytes, other, d.free)
     }
 
+    /**
+     * Clears caches with `pm clear --cache-only` where Android has it (14 and newer). Older builds fall
+     * back to the hidden package-manager call, which on some of them stops answering until a restart.
+     */
     suspend fun clearCache(packages: List<String>): CacheResult = withContext(Dispatchers.IO) {
+        val viaPm = runCatching { call<CacheResult>("clear-cache", *packages.toTypedArray()) }.getOrNull()
+        if (viaPm != null && !viaPm.unsupported) return@withContext viaPm
         val out = shell().clearCache(packages.toTypedArray())
         Log.i(TAG, "clearCache ${packages.size} apps: $out")
         json.decodeFromString(out)
@@ -408,6 +424,37 @@ class Hone(private val context: Context) {
         private set
     private var sdScanning = false
 
+    // ---- trash upkeep and similar photos ----
+
+    /** Opt-in: trash batches older than 30 days are deleted for good on the next scan or overnight. */
+    var autoEmpty by mutableStateOf(prefs.getBoolean("autoEmpty", false))
+        private set
+
+    fun updateAutoEmpty(on: Boolean) {
+        autoEmpty = on
+        prefs.edit().putBoolean("autoEmpty", on).apply()
+    }
+
+    suspend fun expireTrash(): Freed = if (autoEmpty) call("trash-expire", "30") else Freed()
+
+    /** Near-identical photos, found on demand; kept apart from the scan so a rescan does not drop them. */
+    var similar by mutableStateOf<CleanGroup?>(null)
+        private set
+    var similarProgress by mutableStateOf<Float?>(null)
+        private set
+
+    fun findSimilar() {
+        if (similarProgress != null) return
+        similarProgress = 0f
+        scope.launch {
+            runCatching { similarPhotos(context) { similarProgress = it } }.onSuccess { similar = it }.onFailure { Log.w(TAG, "similar", it) }
+            similarProgress = null
+        }
+    }
+
+    /** Every cleanup group: similar photos when found, then the scan's own. */
+    fun groups(): List<CleanGroup> = listOfNotNull(similar) + scan?.groups.orEmpty()
+
     fun scanSd(path: String) {
         if (sdScanning) return
         sdScanning = true
@@ -442,6 +489,10 @@ class Hone(private val context: Context) {
             progress((i + 1) * 8f / paths.size)
         }
         val done = paths.toSet()
+        similar = similar?.let { g ->
+            val left = g.files.filterNot { it.path in done }
+            g.copy(files = left, count = left.size, bytes = left.sumOf { it.bytes })
+        }
         scan = scan?.let { s ->
             s.copy(
                 groups = s.groups.map { g ->
@@ -461,9 +512,51 @@ class Hone(private val context: Context) {
         if (scanning) return
         scanning = true
         scope.launch {
+            runCatching { expireTrash() }
             runCatching { call<Scan>("scan") }.onSuccess { scan = it }.onFailure { Log.w(TAG, "scan", it) }
             scanning = false
         }
+    }
+
+    // ---- per-app switches kept between launches ----
+
+    /** Apps whose network Hone blocked; Android forgets the block on restart, and so does this list. */
+    private val netPrefs = context.getSharedPreferences("net", Context.MODE_PRIVATE)
+    var netBlocked by mutableStateOf(netPrefs.getStringSet("blocked", emptySet()).orEmpty().toSet())
+        private set
+
+    suspend fun setNetwork(pkg: String, allow: Boolean): Changed {
+        val r = call<Changed>(if (allow) "net-allow" else "net-block", pkg)
+        if (r.ok) {
+            netBlocked = if (allow) netBlocked - pkg else netBlocked + pkg
+            netPrefs.edit().putStringSet("blocked", netBlocked).apply()
+        }
+        return r
+    }
+
+    fun forgetNetBlocks() {
+        netBlocked = emptySet()
+        netPrefs.edit().remove("blocked").apply()
+    }
+
+    /** Last speed test, and the one before it, to compare a cleanup's effect. */
+    private val benchPrefs = context.getSharedPreferences("bench", Context.MODE_PRIVATE)
+    var benchLast by mutableStateOf(readBench("last"))
+        private set
+    var benchBefore by mutableStateOf(readBench("before"))
+        private set
+
+    private fun readBench(key: String): Bench? = benchPrefs.getString(key, null)?.let { runCatching { json.decodeFromString<Bench>(it) }.getOrNull() }
+
+    suspend fun runBench(): Bench {
+        val b = json.decodeFromString<Bench>(runLocalEngine(context, "bench", context.cacheDir.path)).copy(at = System.currentTimeMillis())
+        if (b.error == null) {
+            benchBefore = benchLast
+            benchLast = b
+            benchPrefs.edit().putString("last", json.encodeToString(Bench.serializer(), b))
+                .apply { benchBefore?.let { putString("before", json.encodeToString(Bench.serializer(), it)) } }.apply()
+        }
+        return b
     }
 
     // ---- labels ----

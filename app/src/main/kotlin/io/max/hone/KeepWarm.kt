@@ -53,7 +53,7 @@ fun KeepWarmSheet(hone: Hone, onClose: () -> Unit) {
                 .sortedWith(compareByDescending<Pair<String, String>> { it.first in always || it.first in hone.keepWarm }.thenBy { it.second.lowercase() })
         }
     }
-    ModalBottomSheet(onDismissRequest = onClose, containerColor = if (LocalLook.current.mono || LocalLook.current.amoled) Color.Black else cs.surfaceContainerLow) {
+    ModalBottomSheet(onDismissRequest = onClose, containerColor = sheetColor()) {
         Column(Modifier.padding(horizontal = 16.dp).navigationBarsPadding()) {
             Text("Keep warm", style = MaterialTheme.typography.headlineSmall)
             Text(

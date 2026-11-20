@@ -247,3 +247,11 @@ fun RowCard(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
         modifier = modifier.fillMaxWidth(),
     ) { content() }
 }
+
+/** Bottom sheet background: the page colour in Dot and AMOLED (black in dark, light grey in light), a raised tone otherwise. */
+@Composable
+fun sheetColor(): Color {
+    val look = LocalLook.current
+    val cs = MaterialTheme.colorScheme
+    return if (look.mono || look.amoled) cs.surface else cs.surfaceContainerLow
+}
