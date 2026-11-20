@@ -1,7 +1,8 @@
 //! Storage analyzer and a trash that never deletes on the first step.
 //!
-//! Everything stays inside shared storage. Removing moves files into `.HoneTrash` (same filesystem,
-//! so it is an instant rename) with a manifest of where each came from; only "empty trash" deletes.
+//! Everything stays inside shared storage or an SD card. Removing moves files into `.HoneTrash` at the
+//! root of the same volume (an instant rename) with a manifest of where each came from; only emptying
+//! the trash, or the opt-in expiry of old batches, deletes.
 
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
@@ -12,7 +13,7 @@ use std::path::{Component, Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const ROOT: &str = "/storage/emulated/0";
-const TRASH: &str = "/storage/emulated/0/.HoneTrash";
+const TRASH_NAME: &str = ".HoneTrash";
 const LIST_LIMIT: usize = 2000;
 
 /// Top-level folders apps and the system expect to exist; they can be emptied but never removed.
@@ -25,6 +26,42 @@ struct File {
     path: PathBuf,
     bytes: u64,
     modified: u64,
+}
+
+/// Internal shared storage plus every mounted SD card or USB drive.
+fn volumes() -> Vec<PathBuf> {
+    let mut v = vec![PathBuf::from(ROOT)];
+    if let Ok(rd) = fs::read_dir("/storage") {
+        for e in rd.flatten() {
+            let p = e.path();
+            if volume_of(&p).as_deref() == Some(p.as_path()) && p.is_dir() {
+                v.push(p);
+            }
+        }
+    }
+    v
+}
+
+/// The volume root holding `p`: internal storage, or `/storage/<id>` for removable ones.
+fn volume_of(p: &Path) -> Option<PathBuf> {
+    if p.starts_with(ROOT) {
+        return Some(PathBuf::from(ROOT));
+    }
+    let rel = p.strip_prefix("/storage").ok()?;
+    let id = rel.components().next()?.as_os_str().to_string_lossy().to_string();
+    if id == "emulated" || id == "self" {
+        return None;
+    }
+    Some(Path::new("/storage").join(id))
+}
+
+fn trash_dir(vol: &Path) -> PathBuf {
+    vol.join(TRASH_NAME)
+}
+
+/// The trash folder at a volume's root (a folder named the same deeper down is ordinary).
+fn is_trash(p: &Path) -> bool {
+    p.file_name().map(|n| n == TRASH_NAME).unwrap_or(false) && volume_of(p).map(|v| p.parent() == Some(v.as_path())).unwrap_or(false)
 }
 
 fn now() -> u64 {
@@ -69,7 +106,7 @@ fn walk(root: &Path) -> (Vec<File>, Vec<PathBuf>) {
     let Ok(rd) = fs::read_dir(root) else { return (files, empty) };
     for e in rd.flatten() {
         let path = e.path();
-        if path.as_os_str() == TRASH {
+        if is_trash(&path) {
             continue;
         }
         let Ok(m) = fs::symlink_metadata(&path) else { continue };
@@ -104,7 +141,7 @@ fn walk_one(root: &Path) -> (Vec<File>, Vec<PathBuf>) {
         for e in rd.flatten() {
             any = true;
             let path = e.path();
-            if path.as_os_str() == TRASH {
+            if is_trash(&path) {
                 continue;
             }
             let Ok(m) = fs::symlink_metadata(&path) else { continue };
@@ -259,7 +296,21 @@ pub fn scan(root: &str, installed: &HashSet<String>) -> Value {
         .filter(|f| f.path.file_name().map(|n| n.to_string_lossy().starts_with("msgstore-")).unwrap_or(false))
         .collect();
 
+    // Chat apps' media, which people ask to clear out: the one deliberate reach into Android/media.
+    let chat = |dirs: &[&str]| -> Vec<&File> {
+        let dirs: Vec<PathBuf> = dirs.iter().map(|d| root.join(d)).collect();
+        files.iter().filter(|f| dirs.iter().any(|d| f.path.starts_with(d)) && !f.path.ends_with(".nomedia")).collect()
+    };
+    let whatsapp = chat(&["Android/media/com.whatsapp/WhatsApp/Media", "Android/media/com.whatsapp.w4b/WhatsApp Business/Media", "WhatsApp/Media"]);
+    let telegram = chat(&["Android/media/org.telegram.messenger/Telegram", "Telegram"]);
+    let month_ago = now().saturating_sub(30 * 86_400);
+    let shot_dirs = [root.join("DCIM/Screenshots"), root.join("Pictures/Screenshots")];
+    let screenshots: Vec<&File> = user.iter().copied().filter(|f| f.modified < month_ago && shot_dirs.iter().any(|d| f.path.starts_with(d))).collect();
+
     let groups = vec![
+        group("whatsapp", "WhatsApp media", "Photos, videos, voice notes and documents sent and received in chats.", whatsapp),
+        group("telegram", "Telegram media", "Files Telegram saved from chats and channels.", telegram),
+        group("screenshots", "Old screenshots", "Screenshots older than 30 days.", screenshots),
         group("wabackups", "Old WhatsApp backups", "Older daily chat backups. The newest backup, msgstore.db, is always kept.", old_backups),
         group("apks", "APK files", "Install files left behind after installing apps. Safe to remove.", apks),
         group("dupes", "Duplicates", "Exact copies. The oldest copy of each file is kept.", copies),
@@ -285,7 +336,7 @@ pub fn ls(path: &str) -> Value {
     if let Ok(rd) = fs::read_dir(dir) {
         for e in rd.flatten() {
             let p = e.path();
-            if p.as_os_str() == TRASH {
+            if is_trash(&p) {
                 continue;
             }
             let Ok(m) = fs::symlink_metadata(&p) else { continue };
@@ -311,13 +362,13 @@ fn safe(path: &str) -> Result<PathBuf, String> {
         return Err("not a plain full path".into());
     }
     let p = fs::canonicalize(raw).map_err(|e| format!("{e}"))?;
-    let root = Path::new(ROOT);
-    let rel = p.strip_prefix(root).map_err(|_| "outside shared storage".to_string())?;
+    let root = volume_of(&p).ok_or_else(|| "outside shared storage".to_string())?;
+    let rel = p.strip_prefix(&root).map_err(|_| "outside shared storage".to_string())?;
     let parts: Vec<String> = rel.components().map(|c| c.as_os_str().to_string_lossy().to_string()).collect();
     match parts.as_slice() {
         [] => Err("the storage root".into()),
         [one] if MAIN.contains(&one.as_str()) => Err(format!("{one} is a main folder")),
-        [first, ..] if first == ".HoneTrash" => Err("already in the trash".into()),
+        [first, ..] if first == TRASH_NAME => Err("already in the trash".into()),
         [first] if first == "Android" => Err("system folder".into()),
         [first, _] if first == "Android" => Err("system folder".into()),
         _ => Ok(p),
@@ -325,12 +376,11 @@ fn safe(path: &str) -> Result<PathBuf, String> {
 }
 
 pub fn trash(paths: &[String]) -> Value {
-    let batch = Path::new(TRASH).join(now().to_string());
-    let _ = fs::create_dir_all(&batch);
-    let _ = fs::File::create(Path::new(TRASH).join(".nomedia")); // keep trashed photos out of the gallery
+    let stamp = now().to_string();
+    // One batch per volume: a rename cannot cross filesystems.
+    let mut manifests: HashMap<PathBuf, String> = HashMap::new();
     let mut moved = 0u64;
     let mut bytes = 0u64;
-    let mut manifest = String::new();
     let mut errors = vec![];
     let mut gone = 0u64;
     for path in paths {
@@ -342,7 +392,14 @@ pub fn trash(paths: &[String]) -> Value {
         match safe(path) {
             Err(why) => errors.push(json!({ "path": path, "error": why })),
             Ok(p) => {
-                let rel = p.strip_prefix(ROOT).unwrap().to_path_buf();
+                let vol = volume_of(&p).unwrap();
+                let rel = p.strip_prefix(&vol).unwrap().to_path_buf();
+                let batch = trash_dir(&vol).join(&stamp);
+                if !manifests.contains_key(&vol) {
+                    let _ = fs::create_dir_all(&batch);
+                    let _ = fs::File::create(trash_dir(&vol).join(".nomedia")); // keep trashed photos out of the gallery
+                }
+                let manifest = manifests.entry(vol.clone()).or_default();
                 let dest = batch.join(&rel);
                 let size = if p.is_dir() { dir_size(&p).0 } else { fs::metadata(&p).map(|m| m.len()).unwrap_or(0) };
                 let _ = fs::create_dir_all(dest.parent().unwrap());
@@ -358,40 +415,56 @@ pub fn trash(paths: &[String]) -> Value {
             }
         }
     }
-    if manifest.is_empty() {
-        let _ = fs::remove_dir_all(&batch);
-    } else {
-        let _ = fs::write(batch.join(".manifest"), manifest);
+    for (vol, manifest) in manifests {
+        let batch = trash_dir(&vol).join(&stamp);
+        if manifest.is_empty() {
+            let _ = fs::remove_dir(&batch); // only if nothing else landed in it this second
+        } else {
+            // Append: two quick calls in the same second share a batch.
+            let old = fs::read_to_string(batch.join(".manifest")).unwrap_or_default();
+            let _ = fs::write(batch.join(".manifest"), old + &manifest);
+        }
     }
     json!({ "moved": moved, "bytes": bytes, "gone": gone, "errors": errors })
 }
 
 fn trash_size() -> u64 {
-    dir_size(Path::new(TRASH)).0
+    volumes().iter().map(|v| dir_size(&trash_dir(v)).0).sum()
 }
 
-fn batches() -> Vec<(PathBuf, Vec<String>)> {
+/// Every trash batch on every volume: (volume root, batch folder, items relative to the volume).
+fn batches() -> Vec<(PathBuf, PathBuf, Vec<String>)> {
     let mut out = vec![];
-    if let Ok(rd) = fs::read_dir(TRASH) {
+    for vol in volumes() {
+        let Ok(rd) = fs::read_dir(trash_dir(&vol)) else { continue };
         for e in rd.flatten() {
             if let Ok(text) = fs::read_to_string(e.path().join(".manifest")) {
-                out.push((e.path(), text.lines().filter(|l| !l.is_empty()).map(str::to_string).collect()));
+                out.push((vol.clone(), e.path(), text.lines().filter(|l| !l.is_empty()).map(str::to_string).collect()));
             }
         }
     }
     out
 }
 
+/// An item's id is where it sits in the trash: unique across volumes and batches.
+fn item_id(batch: &Path, rel: &str) -> String {
+    batch.join(rel).to_string_lossy().to_string()
+}
+
+fn size_of(p: &Path) -> u64 {
+    if p.is_dir() { dir_size(p).0 } else { fs::metadata(p).map(|m| m.len()).unwrap_or(0) }
+}
+
 pub fn trash_list() -> Value {
     let mut items = vec![];
-    for (batch, rels) in batches() {
+    for (vol, batch, rels) in batches() {
         let when: u64 = batch.file_name().and_then(|n| n.to_string_lossy().parse().ok()).unwrap_or(0);
         for rel in rels {
             let at = batch.join(&rel);
-            let bytes = if at.is_dir() { dir_size(&at).0 } else { fs::metadata(&at).map(|m| m.len()).unwrap_or(0) };
+            let bytes = size_of(&at);
             items.push(json!({
-                "id": format!("{}/{rel}", batch.file_name().unwrap().to_string_lossy()),
-                "original": Path::new(ROOT).join(&rel).to_string_lossy(),
+                "id": item_id(&batch, &rel),
+                "original": vol.join(&rel).to_string_lossy(),
                 "bytes": bytes, "trashed": when,
             }));
         }
@@ -404,15 +477,14 @@ pub fn trash_list() -> Value {
 pub fn restore(ids: &[String]) -> Value {
     let mut restored = 0;
     let mut errors = vec![];
-    for (batch, rels) in batches() {
-        let tag = batch.file_name().unwrap().to_string_lossy().to_string();
+    for (vol, batch, rels) in batches() {
         let mut keep = vec![];
         for rel in rels {
-            if !ids.contains(&format!("{tag}/{rel}")) {
+            if !ids.contains(&item_id(&batch, &rel)) {
                 keep.push(rel);
                 continue;
             }
-            let mut dest = Path::new(ROOT).join(&rel);
+            let mut dest = vol.join(&rel);
             if dest.exists() {
                 let stem = dest.file_stem().unwrap_or_default().to_string_lossy().to_string();
                 let ext = dest.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
@@ -442,16 +514,15 @@ pub fn restore(ids: &[String]) -> Value {
 pub fn purge(ids: &[String]) -> Value {
     let mut removed = 0u64;
     let mut freed = 0u64;
-    for (batch, rels) in batches() {
-        let tag = batch.file_name().unwrap().to_string_lossy().to_string();
+    for (_, batch, rels) in batches() {
         let mut keep = vec![];
         for rel in rels {
-            if !ids.contains(&format!("{tag}/{rel}")) {
+            if !ids.contains(&item_id(&batch, &rel)) {
                 keep.push(rel);
                 continue;
             }
             let at = batch.join(&rel);
-            let size = if at.is_dir() { dir_size(&at).0 } else { fs::metadata(&at).map(|m| m.len()).unwrap_or(0) };
+            let size = size_of(&at);
             let gone = if at.is_dir() { fs::remove_dir_all(&at) } else { fs::remove_file(&at) };
             if gone.is_ok() || !at.exists() {
                 removed += 1;
@@ -471,8 +542,34 @@ pub fn purge(ids: &[String]) -> Value {
 
 pub fn empty_trash() -> Value {
     let bytes = trash_size();
-    let ok = fs::remove_dir_all(TRASH).is_ok() || !Path::new(TRASH).exists();
+    let ok = volumes().iter().map(|v| trash_dir(v)).all(|t| fs::remove_dir_all(&t).is_ok() || !t.exists());
     json!({ "ok": ok, "freed": bytes })
+}
+
+/// A batch is named by the second it was trashed; it expires once older than `days`.
+fn expired(tag: &str, now: u64, days: u64) -> bool {
+    tag.parse::<u64>().map(|t| t + days * 86_400 < now).unwrap_or(false)
+}
+
+/// Deletes trash batches older than `days`; the app calls it only when the user turned auto-empty on.
+pub fn expire(days: &str) -> Value {
+    let Ok(days) = days.parse::<u64>() else { return json!({ "error": "days must be a number" }) };
+    if days == 0 {
+        return json!({ "error": "days must be at least 1" });
+    }
+    let (mut removed, mut freed) = (0u64, 0u64);
+    let t = now();
+    for (_, batch, rels) in batches() {
+        if !expired(&batch.file_name().unwrap().to_string_lossy(), t, days) {
+            continue;
+        }
+        let size = dir_size(&batch).0;
+        if fs::remove_dir_all(&batch).is_ok() {
+            removed += rels.len() as u64;
+            freed += size;
+        }
+    }
+    json!({ "removed": removed, "freed": freed })
 }
 
 #[cfg(test)]
@@ -484,6 +581,26 @@ mod tests {
         for p in ["/storage/emulated/0", "/storage/emulated/0/../", "relative/file", "/system/app", "/data/data"] {
             assert!(safe(p).is_err(), "{p} must be refused");
         }
+    }
+
+    #[test]
+    fn finds_the_volume_of_a_path() {
+        assert_eq!(volume_of(Path::new("/storage/emulated/0/DCIM/a.jpg")), Some(PathBuf::from(ROOT)));
+        assert_eq!(volume_of(Path::new("/storage/1A2B-3C4D/Music/x.mp3")), Some(PathBuf::from("/storage/1A2B-3C4D")));
+        assert_eq!(volume_of(Path::new("/storage/1A2B-3C4D")), Some(PathBuf::from("/storage/1A2B-3C4D")));
+        assert_eq!(volume_of(Path::new("/storage/emulated/10/x")), None);
+        assert_eq!(volume_of(Path::new("/storage/self/primary/x")), None);
+        assert_eq!(volume_of(Path::new("/data/data/x")), None);
+        assert!(is_trash(Path::new("/storage/1A2B-3C4D/.HoneTrash")));
+        assert!(!is_trash(Path::new("/storage/1A2B-3C4D/Music/.HoneTrash")));
+    }
+
+    #[test]
+    fn old_batches_expire() {
+        let day = 86_400;
+        assert!(expired("1000", 1000 + 31 * day, 30));
+        assert!(!expired("1000", 1000 + 29 * day, 30));
+        assert!(!expired("not-a-time", u64::MAX, 30));
     }
 
     #[test]

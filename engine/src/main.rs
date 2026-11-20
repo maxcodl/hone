@@ -4,6 +4,7 @@
 mod battery;
 mod debloat;
 mod files;
+mod system;
 
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -50,6 +51,21 @@ fn main() {
         "trash-restore" => files::restore(rest),
         "empty-trash" => files::empty_trash(),
         "trash-purge" => files::purge(rest),
+        "trash-expire" => files::expire(arg(rest, 0)),
+        "clear-cache" => clear_cache(rest),
+        "drain" => system::drain(),
+        "privacy" => system::privacy(),
+        "revoke" => system::revoke(rest),
+        "autostart-off" => system::autostart(rest, false),
+        "autostart-on" => system::autostart(rest, true),
+        "freeze" => system::freeze(rest, true),
+        "unfreeze" => system::freeze(rest, false),
+        "net-block" => system::network(rest, false),
+        "net-allow" => system::network(rest, true),
+        "display" => system::display(),
+        "set-display" => system::set_display(rest),
+        // Runs as Hone itself, in its own cache folder.
+        "bench" => system::bench(arg(rest, 0), 128),
         "maintenance" => output(run("sm", &["idle-maint", "run"])),
         "remove" => change(rest, true),
         "running" => running(),
@@ -499,6 +515,28 @@ fn trim_caches() -> Value {
     json!({ "freed": after.saturating_sub(before), "free": after, "output": out })
 }
 
+/// Clears each app's cache with `pm clear --cache-only` (Android 14 and newer). On older builds the
+/// first answer is a usage error, and the app falls back to the package manager call.
+fn clear_cache(pkgs: &[String]) -> Value {
+    let (mut cleared, mut failed) = (0, 0);
+    for p in pkgs.iter().filter(|p| p.as_str() != system::HONE) {
+        let out = run("cmd", &["package", "clear", "--cache-only", p]);
+        if out.contains("Success") {
+            cleared += 1;
+        } else if cleared == 0 && failed == 0 && unsupported_option(&out) {
+            return json!({ "unsupported": true });
+        } else {
+            failed += 1;
+        }
+    }
+    json!({ "cleared": cleared, "failed": failed })
+}
+
+fn unsupported_option(out: &str) -> bool {
+    let o = out.to_ascii_lowercase();
+    o.contains("unknown option") || o.contains("--cache-only") || o.contains("usage:")
+}
+
 fn list(extra: &[&str]) -> HashSet<String> {
     let args = [&["list", "packages"][..], extra].concat();
     run("cmd", &[&["package"][..], &args].concat())
@@ -597,5 +635,11 @@ mod tests {
             assert!(!super::debloat::removable(core), "{core} must never be removable");
         }
         assert!(super::debloat::removable("com.android.egg"));
+    }
+
+    #[test]
+    fn spots_a_build_without_cache_only() {
+        assert!(super::unsupported_option("Error: Unknown option: --cache-only"));
+        assert!(!super::unsupported_option("Failed"));
     }
 }
