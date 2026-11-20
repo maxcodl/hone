@@ -43,6 +43,7 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 
 private val filters = listOf("Safe", "Caution", "Removed")
+private val modes = listOf("Debloat", "Installed", "Privacy", "Startup")
 
 @Composable
 fun AppsScreen(hone: Hone, pad: PaddingValues, say: (String) -> Unit) {
@@ -59,6 +60,30 @@ fun AppsScreen(hone: Hone, pad: PaddingValues, say: (String) -> Unit) {
     var sort by rememberSaveable { mutableStateOf(AppSort.Name) }
     var open by remember { mutableStateOf<InstalledApp?>(null) }
     LaunchedEffect(mode) { if (mode == 1 && installed == null) installed = installedApps(hone, context) }
+    var privacy by remember { mutableStateOf<Privacy?>(null) }
+    var boot by remember { mutableStateOf<List<BootApp>?>(null) }
+    var revoke by remember { mutableStateOf<Pair<PrivacyApp, String>?>(null) }
+    LaunchedEffect(mode, hone.full) {
+        if (!hone.full) return@LaunchedEffect
+        if (mode == 2 && privacy == null) privacy = runCatching { hone.call<Privacy>("privacy") }.onFailure { say("Could not read access records: ${it.message}") }.getOrNull() ?: Privacy()
+        if (mode == 3 && boot == null) boot = runCatching { bootApps(context) }.getOrDefault(emptyList())
+    }
+    revoke?.let { (app, op) ->
+        val what = when (op) { "CAMERA" -> "camera"; "RECORD_AUDIO" -> "microphone"; "READ_CLIPBOARD" -> "clipboard"; else -> "location" }
+        Confirm(
+            "Remove ${hone.label(app.pkg)}'s $what access?", "It can ask for it again next time it needs it.", "Remove",
+            onConfirm = {
+                scope.launch {
+                    working = app.pkg
+                    val r = runCatching { hone.call<Changed>("revoke", app.pkg, op) }.getOrNull()
+                    privacy = runCatching { hone.call<Privacy>("privacy") }.getOrNull() ?: privacy
+                    working = null
+                    say(if (r?.ok == true) "${hone.label(app.pkg)} no longer has $what access" else "Could not remove it: ${r?.output?.take(80).orEmpty()}")
+                }
+            },
+            onDismiss = { revoke = null },
+        )
+    }
 
     suspend fun reload() {
         pkgs = runCatching { hone.debloatList() }.onFailure { say("Could not list apps: ${it.message}") }.getOrNull() ?: pkgs
@@ -119,16 +144,38 @@ fun AppsScreen(hone: Hone, pad: PaddingValues, say: (String) -> Unit) {
         }
         item(key = "mode") {
             Row(Modifier.fillMaxWidth().enter(1), horizontalArrangement = Arrangement.spacedBy(ButtonGroupDefaults.ConnectedSpaceBetween)) {
-                listOf("Debloat", "Installed").forEachIndexed { i, label ->
+                modes.forEachIndexed { i, label ->
                     ToggleButton(
                         checked = mode == i, onCheckedChange = { mode = i }, modifier = Modifier.weight(1f),
-                        shapes = if (i == 0) ButtonGroupDefaults.connectedLeadingButtonShapes() else ButtonGroupDefaults.connectedTrailingButtonShapes(),
-                    ) { Text(label) }
+                        // Four labels in the Dot monospace do not fit with the default 16dp sides.
+                        contentPadding = PaddingValues(horizontal = 4.dp),
+                        shapes = when (i) {
+                            0 -> ButtonGroupDefaults.connectedLeadingButtonShapes()
+                            modes.lastIndex -> ButtonGroupDefaults.connectedTrailingButtonShapes()
+                            else -> ButtonGroupDefaults.connectedMiddleButtonShapes()
+                        },
+                    ) { Text(label, maxLines = 1, softWrap = false) }
                 }
             }
         }
         if (mode == 1) {
             appItems(hone, installed, query, { query = it }, sort, { sort = it }) { open = it }
+            return@LazyColumn
+        }
+        if (mode == 2) {
+            privacyItems(hone, privacy, working) { app, op -> revoke = app to op }
+            return@LazyColumn
+        }
+        if (mode == 3) {
+            startupItems(hone, boot, working) { app, on ->
+                scope.launch {
+                    working = app.pkg
+                    val r = runCatching { hone.call<Changed>(if (on) "autostart-on" else "autostart-off", app.pkg, *app.components.toTypedArray()) }.getOrNull()
+                    boot = runCatching { bootApps(context) }.getOrDefault(boot.orEmpty())
+                    working = null
+                    say(if (r?.ok == true) "${app.label} ${if (on) "starts at boot again" else "no longer starts at boot"}" else "Could not change it: ${r?.output?.take(80).orEmpty()}")
+                }
+            }
             return@LazyColumn
         }
         item(key = "filter") {

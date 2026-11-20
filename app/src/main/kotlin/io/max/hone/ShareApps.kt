@@ -78,11 +78,13 @@ data class InstalledApp(
     val lastUsed: Long?,
     val running: Boolean,
     val bgRestricted: Boolean = false,
+    val frozen: Boolean = false,
+    val net: DataUse? = null,
 ) {
     val totalBytes get() = apkBytes + (dataBytes ?: 0)
 }
 
-enum class AppSort(val title: String) { Name("Name"), Size("Size"), Data("Data"), LastUsed("Last used"), Newest("Newest"), Running("Running") }
+enum class AppSort(val title: String) { Name("Name"), Size("Size"), Data("Data"), Internet("Internet"), LastUsed("Last used"), Newest("Newest"), Running("Running") }
 
 @Serializable data class Running(val packages: List<String> = emptyList())
 
@@ -102,6 +104,7 @@ suspend fun installedApps(hone: Hone, context: Context): List<InstalledApp> = wi
     }.getOrDefault(emptyMap())
     val running: Set<String> = if (hone.full) runCatching { hone.call<Running>("running").packages.toSet() }.getOrDefault(emptySet()) else emptySet()
     val restricted: Set<String> = if (hone.full) runCatching { hone.call<Running>("bg-restricted").packages.toSet() }.getOrDefault(emptySet()) else emptySet()
+    val net: Map<String, DataUse> = if (usage) runCatching { dataUsage(context) }.getOrDefault(emptyMap()) else emptyMap()
     infos
         .filter { it.flags and ApplicationInfo.FLAG_SYSTEM == 0 || it.flags and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP != 0 }
         .map { info ->
@@ -124,6 +127,8 @@ suspend fun installedApps(hone: Hone, context: Context): List<InstalledApp> = wi
                 lastUsed = lastUsed[info.packageName]?.takeIf { it > 0 },
                 running = info.packageName in running,
                 bgRestricted = info.packageName in restricted,
+                frozen = info.flags and ApplicationInfo.FLAG_SUSPENDED != 0,
+                net = net[info.packageName],
             )
         }
 }
@@ -132,6 +137,7 @@ fun List<InstalledApp>.sortedFor(sort: AppSort): List<InstalledApp> = when (sort
     AppSort.Name -> sortedBy { it.label.lowercase() }
     AppSort.Size -> sortedByDescending { it.totalBytes }
     AppSort.Data -> sortedByDescending { it.dataBytes ?: 0 }
+    AppSort.Internet -> sortedByDescending { it.net?.total ?: 0 }
     AppSort.LastUsed -> sortedByDescending { it.lastUsed ?: 0 }
     AppSort.Newest -> sortedByDescending { it.installed }
     AppSort.Running -> sortedWith(compareByDescending<InstalledApp> { it.running }.thenBy { it.label.lowercase() })
@@ -212,7 +218,7 @@ fun LazyListScope.appItems(
         item(key = "loading") { Loading(PaddingValues(32.dp), "Listing apps") }
         return
     }
-    if (!hone.usageAllowed() && sort in setOf(AppSort.Size, AppSort.Data, AppSort.LastUsed)) item(key = "usage") {
+    if (!hone.usageAllowed() && sort in setOf(AppSort.Size, AppSort.Data, AppSort.Internet, AppSort.LastUsed)) item(key = "usage") {
         Text("Turn on usage access for Hone to sort by ${sort.title.lowercase()}.", Modifier.padding(8.dp), color = MaterialTheme.colorScheme.error)
     }
     if (sort == AppSort.Running && !hone.full) item(key = "run") {
@@ -232,6 +238,8 @@ fun LazyListScope.appItems(
                     app.pkg == "io.max.hone" -> Pill("This app", MaterialTheme.colorScheme.primary)
                     app.archived -> Pill("Archived", MaterialTheme.colorScheme.tertiary)
                     !app.enabled -> Pill("Off", MaterialTheme.colorScheme.error)
+                    app.frozen -> Pill("Frozen", MaterialTheme.colorScheme.outline)
+                    app.pkg in hone.netBlocked -> Pill("Offline", MaterialTheme.colorScheme.outline)
                     app.bgRestricted -> Pill("No background", MaterialTheme.colorScheme.outline)
                     app.running -> Pill("Running", Color(0xFF4CAF50))
                 }
@@ -253,6 +261,7 @@ private fun detail(app: InstalledApp, sort: AppSort): String = listOfNotNull(
     app.version.ifEmpty { null },
     when (sort) {
         AppSort.Data -> app.dataBytes?.let { "data ${bytes(it)}" }
+        AppSort.Internet -> app.net?.let { "${bytes(it.mobile)} mobile  ·  ${bytes(it.wifi)} Wi-Fi, 30 days" } ?: "no internet use"
         AppSort.LastUsed -> app.lastUsed?.let { "used ${ago(it)}" } ?: "not used lately"
         AppSort.Newest -> "installed ${ago(app.installed)}"
         else -> bytes(app.totalBytes)
@@ -281,8 +290,9 @@ fun AppSheet(hone: Hone, app: InstalledApp, say: (String) -> Unit, onClose: () -
     }
 
     ask?.let { (cmd, title, text) ->
-        Confirm(title, text, when (cmd) { "disable" -> "Turn off"; "archive" -> "Archive"; else -> "Uninstall" }, onConfirm = {
+        Confirm(title, text, when (cmd) { "disable" -> "Turn off"; "archive" -> "Archive"; "freeze" -> "Freeze"; else -> "Uninstall" }, onConfirm = {
             when (cmd) {
+                "freeze" -> shell("freeze", "${app.label} frozen")
                 "uninstall" -> shell("uninstall", "${app.label} uninstalled").also { onClose() }
                 "disable" -> shell("disable", "${app.label} turned off")
                 "archive" -> shell("archive", "${app.label} archived")
@@ -290,7 +300,7 @@ fun AppSheet(hone: Hone, app: InstalledApp, say: (String) -> Unit, onClose: () -
         }, onDismiss = { ask = null })
     }
 
-    ModalBottomSheet(onDismissRequest = onClose, containerColor = if (LocalLook.current.amoled || LocalLook.current.mono) Color.Black else cs.surfaceContainerLow) {
+    ModalBottomSheet(onDismissRequest = onClose, containerColor = sheetColor()) {
         Column(Modifier.padding(horizontal = 12.dp).navigationBarsPadding()) {
             Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 AppIcon(hone, app.pkg, 52.dp)
@@ -316,6 +326,19 @@ fun AppSheet(hone: Hone, app: InstalledApp, say: (String) -> Unit, onClose: () -
                 Action(Sym.Download, "Save APK", "To Download/Hone") { run("save") { "Saved to ${saveApp(context, app)}" } }
             }
             val self = app.pkg == context.packageName
+            if (!self && hone.full && app.enabled && !app.archived && !app.system) {
+                if (app.frozen) Action(Sym.PlayCircle, "Unfreeze", "Back to normal at once") { shell("unfreeze", "${app.label} unfrozen") }
+                else Action(Sym.Lock, "Freeze", "Paused and greyed out, data and icon kept; unfreeze in one tap") {
+                    ask = Triple("freeze", "Freeze ${app.label}?", "It cannot run or send notifications until you unfreeze it here. Nothing is deleted.")
+                }
+                val offline = app.pkg in hone.netBlocked
+                Action(if (offline) Sym.CheckCircle else Sym.Block, if (offline) "Allow internet" else "Block internet", app.net?.let { "${bytes(it.total)} used in 30 days" + if (offline) "" else "; the block lasts until restart" }) {
+                    run("net") {
+                        val r = hone.setNetwork(app.pkg, offline)
+                        if (r.ok) (if (offline) "${app.label} can use the internet" else "${app.label} is offline until restart") else r.output.ifBlank { "No change" }
+                    }
+                }
+            }
             if (!self) when {
                 !app.enabled -> Action(Sym.CheckCircle, "Turn on") { if (hone.full) shell("enable", "${app.label} turned on") else hone.openAppInfo(app.pkg) }
                 else -> Action(Sym.Block, "Turn off", "Hidden and stopped until turned on again") {
