@@ -64,6 +64,7 @@ fun BatteryScreen(hone: Hone, pad: PaddingValues, say: (String) -> Unit) {
     var history by remember { mutableStateOf<BatteryHistory?>(null) }
     var monitoring by remember { mutableStateOf(BatteryPrefs.monitoring(context)) }
     var alerts by remember { mutableStateOf(BatteryPrefs.alerts(context)) }
+    val drain = rememberDrain(hone)
 
     val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
     LaunchedEffect(lifecycle) {
@@ -164,6 +165,8 @@ fun BatteryScreen(hone: Hone, pad: PaddingValues, say: (String) -> Unit) {
                 }
             }
         }
+
+        drainItems(hone, drain, say)
 
         item(key = "monitor") {
             SectionCard(Modifier.enter(5)) {

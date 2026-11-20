@@ -209,11 +209,12 @@ class MonitorService : Service() {
     }
 }
 
-/** Starts monitoring again after a restart, if it was on. */
+/** Starts monitoring again after a restart, if it was on, and clears network blocks Android has dropped. */
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(c: Context, i: Intent) {
-        if (i.action == Intent.ACTION_BOOT_COMPLETED && BatteryPrefs.monitoring(c)) {
-            c.startForegroundService(Intent(c, MonitorService::class.java))
-        }
+        if (i.action != Intent.ACTION_BOOT_COMPLETED) return
+        if (BatteryPrefs.monitoring(c)) c.startForegroundService(Intent(c, MonitorService::class.java))
+        // Android drops per-app network blocks on restart; forget them too so the list stays true.
+        c.getSharedPreferences("net", Context.MODE_PRIVATE).edit().remove("blocked").apply()
     }
 }
