@@ -139,6 +139,7 @@ fun sectionOf(groupId: String, path: String): String {
         else -> "Temp files"
     }
     if (groupId == "empty" || groupId == "leftovers") return path.removePrefix("$ROOT/").substringBefore('/')
+    if (groupId == "whatsapp") return (if ("/Sent/" in path) "Sent " else "Received ") + sectionOf("", path).lowercase()
     return when (ext(path)) {
         in IMAGE, "dng", "raw" -> "Images"
         in VIDEO, "avi", "ts" -> "Videos"

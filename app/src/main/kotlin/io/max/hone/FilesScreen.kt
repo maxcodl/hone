@@ -127,10 +127,17 @@ private fun Overview(hone: Hone, pad: PaddingValues, say: (String) -> Unit, top:
     Box(Modifier.fillMaxSize()) {
     LazyColumn(contentPadding = pad + 16.dp, verticalArrangement = Arrangement.spacedBy(14.dp)) {
         top()
+        if (hone.storageSection != 2 && !hone.canReadFiles()) item(key = "filesAccess") {
+            SectionCard(Modifier.enter(1)) {
+                CardHeader(Sym.SdCard, "Allow all files access", "Lets Hone see every file, show previews and move files to its trash and back, also without Shizuku.", MaterialShapes.Clover4Leaf)
+                Button(onClick = { hone.openFilesAccess() }, shapes = ButtonDefaults.shapes(), modifier = Modifier.align(Alignment.End)) { Text("Open settings") }
+            }
+        }
         if (hone.storageSection == 0) {
             if (scan != null) {
                 item(key = "cleanTitle") { SectionTitle("Cleanup") }
-                scan.groups.forEachIndexed { i, g ->
+                if (hone.similar == null && hone.canReadFiles()) item(key = "similar") { SimilarCard(hone) }
+                hone.groups().forEachIndexed { i, g ->
                     item(key = "g:" + g.id) {
                         RowCard(Modifier.enter(i + 3).clickable(enabled = g.count > 0) { open(Page.Group(g.id)) }) {
                             Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -139,7 +146,7 @@ private fun Overview(hone: Hone, pad: PaddingValues, say: (String) -> Unit, top:
                                 Column(Modifier.weight(1f)) {
                                     Text(g.title, style = MaterialTheme.typography.titleMedium)
                                     Text(
-                                        if (g.count == 0) "Nothing found" else "${g.count} ${if (g.id == "empty" || g.id == "leftovers") "folders" else "files"}",
+                                        if (g.count == 0) "Nothing found" else "${g.count} ${if (g.id == "empty" || g.id == "leftovers") "folder" else "file"}${if (g.count == 1) "" else "s"}",
                                         style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant,
                                     )
                                 }
@@ -204,6 +211,32 @@ private fun Overview(hone: Hone, pad: PaddingValues, say: (String) -> Unit, top:
     }
 }
 
+/** Offers the near-identical photo search; it reads every camera photo once, so it runs on request. */
+@Composable
+private fun SimilarCard(hone: Hone) {
+    val cs = MaterialTheme.colorScheme
+    RowCard {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                ShapeIcon(Sym.Image, MaterialShapes.Cookie9Sided, size = 44.dp)
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Similar photos", style = MaterialTheme.typography.titleMedium)
+                    Text("Bursts and retakes of the same shot in your camera and pictures folders.", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                }
+            }
+            val p = hone.similarProgress
+            if (p != null) {
+                Text("Comparing photos  ·  ${(p * 100).toInt()}%", style = MaterialTheme.typography.titleSmall)
+                androidx.compose.material3.LinearWavyProgressIndicator(progress = { p }, modifier = Modifier.fillMaxWidth())
+            }
+            FilledTonalButton(onClick = { hone.findSimilar() }, enabled = p == null, shapes = ButtonDefaults.shapes(), modifier = Modifier.align(Alignment.End)) {
+                Text(if (p == null) "Find" else "Looking")
+            }
+        }
+    }
+}
+
 @Composable
 private fun TrashRow(size: Long, onClick: () -> Unit) {
     val cs = MaterialTheme.colorScheme
@@ -223,7 +256,7 @@ private fun TrashRow(size: Long, onClick: () -> Unit) {
 
 @Composable
 private fun GroupPage(hone: Hone, pad: PaddingValues, id: String, say: (String) -> Unit, back: () -> Unit) {
-    val group = hone.scan?.groups?.firstOrNull { it.id == id } ?: return back()
+    val group = hone.groups().firstOrNull { it.id == id } ?: return back()
     val chosen = remember(id) { mutableStateListOf<String>() }
     val scope = rememberCoroutineScope()
     val chosenBytes = group.files.filter { it.path in chosen }.sumOf { it.bytes }
@@ -370,6 +403,20 @@ private fun TrashPage(hone: Hone, pad: PaddingValues, say: (String) -> Unit, bac
                     }
                 }
                 Text("Files here still use space. Restore anything you need, then empty the trash to free it.", style = MaterialTheme.typography.bodyMedium)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        RowLabel("Auto-empty")
+                        Text("Delete items for good once they have been here 30 days.", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    androidx.compose.material3.Switch(checked = hone.autoEmpty, onCheckedChange = { on ->
+                        hone.updateAutoEmpty(on)
+                        if (on) scope.launch {
+                            runCatching { hone.expireTrash() }.onSuccess { if (it.freed > 0) say("Deleted ${bytes(it.freed)} older than 30 days") }
+                            load()
+                        }
+                    })
+                }
                 emptying?.let { p ->
                     Text("Deleting  ·  ${(p * 100).toInt()}%", style = MaterialTheme.typography.titleSmall)
                     androidx.compose.material3.LinearWavyProgressIndicator(progress = { p }, modifier = Modifier.fillMaxWidth(), color = cs.error)
@@ -577,6 +624,8 @@ private fun groupIcon(id: String): ImageVector = when (id) {
     "leftovers" -> Sym.Widgets
     "temp" -> Sym.Schedule
     "large" -> Sym.SdCard
+    "whatsapp", "telegram" -> Sym.Share
+    "screenshots", "similar" -> Sym.Image
     else -> Sym.FolderOff
 }
 
