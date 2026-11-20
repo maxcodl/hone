@@ -46,6 +46,37 @@
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>
         </receiver>
+        <!-- Overnight upkeep while charging and idle. -->
+        <service
+            android:name=".NightJob"
+            android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
+        <service
+            android:name=".FreeMemoryTile"
+            android:exported="true"
+            android:icon="@drawable/ic_stat_hone"
+            android:label="Free memory"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+        <service
+            android:name=".OptimiseTile"
+            android:exported="true"
+            android:icon="@drawable/ic_stat_hone"
+            android:label="Optimise apps"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+        <receiver android:name=".HoneWidget" android:exported="true" android:label="Hone">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_info" />
+        </receiver>
         <!-- Hands shared APKs to other apps. -->
         <provider
             android:name="androidx.core.content.FileProvider"
