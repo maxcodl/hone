@@ -60,6 +60,7 @@ fun SpeedScreen(hone: Hone, pad: PaddingValues, say: (String) -> Unit) {
     var batchTotal by remember { mutableStateOf(0) }
     var batchDone by remember { mutableStateOf(0) }
     val cs = MaterialTheme.colorScheme
+    val context = androidx.compose.ui.platform.LocalContext.current
     LaunchedEffect(Unit) { if (hone.full && hone.dexopt == null) hone.refreshDexopt() }
     var askOptimize by remember { mutableStateOf(false) }
     var showKeep by remember { mutableStateOf(false) }
@@ -166,13 +167,16 @@ fun SpeedScreen(hone: Hone, pad: PaddingValues, say: (String) -> Unit) {
                         Text("Keep warm: ${hone.keepWarm.size + hone.alwaysKept().size} apps", style = MaterialTheme.typography.labelLarge)
                     }
                 }) {
-                    job("ram") { hone.freeRam().let { "Closed ${if (it.apps > 0) "${it.apps} apps, " else ""}freed ${bytes(it.freed)}, ${bytes(it.available)} now free" } }
+                    job("ram") { hone.freeRam().also { HoneWidget.refresh(context) }.let { "Closed ${if (it.apps > 0) "${it.apps} apps, " else ""}freed ${bytes(it.freed)}, ${bytes(it.available)} now free" } }
                 }
                 if (hone.full) Tile(Modifier.weight(1f).fillMaxHeight(), Sym.Build, MaterialShapes.Gem, "Storage upkeep", "Trim and tidy storage", busy == "trim", busy == null) {
                     job("trim") { hone.raw("maintenance"); "Storage upkeep started" }
                 }
             }
         }
+        item(key = "bench") { BenchCard(hone, say, Modifier.enter(2)) }
+        item(key = "display") { DisplayCard(hone, say, Modifier.enter(2)) }
+        item(key = "night") { NightCard(hone, Modifier.enter(2)) }
         if (hone.full) item(key = "restart") {
             SectionCard(Modifier.enter(2)) {
                 CardHeader(Sym.Restart, "Restart", "Clears memory built up over days and resets stuck services.", MaterialShapes.Arch)
