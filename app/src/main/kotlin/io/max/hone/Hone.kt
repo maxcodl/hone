@@ -122,6 +122,7 @@ data class AppSize(val pkg: String, val label: String, val system: Boolean, val 
 enum class Access { NoShizuku, Ask, Ready }
 
 const val TAG = "Hone"
+const val SHIZUKU_REPO = "RikkaApps/Shizuku"
 
 /** Talks to the Rust engine through a Shizuku shell service, and keeps app-wide jobs alive across tabs. */
 class Hone(private val context: Context) {
@@ -165,11 +166,46 @@ class Hone(private val context: Context) {
 
     fun askPermission() = Shizuku.requestPermission(7)
 
-    fun openShizuku() {
+    private fun shizukuLaunch(): Intent? {
         val launcher = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
         val pkg = pm.queryIntentActivities(launcher, 0).map { it.activityInfo.packageName }
             .firstOrNull { it.startsWith("moe.shizuku.privileged.api") } ?: "moe.shizuku.privileged.api"
-        pm.getLaunchIntentForPackage(pkg)?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)?.let(context::startActivity)
+        return pm.getLaunchIntentForPackage(pkg)
+    }
+
+    /** Whether Shizuku is installed; re-read each time Hone comes back, since it may have just been installed. */
+    var shizukuInstalled by mutableStateOf(shizukuLaunch() != null)
+        private set
+
+    fun recheckShizuku() {
+        shizukuInstalled = shizukuLaunch() != null
+        access = readAccess()
+    }
+
+    fun openShizuku() {
+        shizukuLaunch()?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)?.let(context::startActivity)
+    }
+
+    /** Download progress of Shizuku's own APK (0..1) while it is fetched; null otherwise. */
+    var shizukuDownload by mutableStateOf<Float?>(null)
+        private set
+    var shizukuError by mutableStateOf<String?>(null)
+        private set
+
+    /** Fetches the latest Shizuku release from its GitHub page and hands it to Android's installer, which asks first. */
+    fun installShizuku() {
+        if (shizukuDownload != null) return
+        shizukuDownload = 0f
+        shizukuError = null
+        scope.launch {
+            runCatching {
+                val r = Updater.latest(SHIZUKU_REPO) ?: error("no release")
+                val url = r.apkUrl ?: error("no APK")
+                Updater.download(context, url, "shizuku.apk") { shizukuDownload = it }
+            }.onSuccess { Updater.install(context, it) }
+                .onFailure { Log.w(TAG, "shizuku download", it); shizukuError = "Could not download Shizuku." }
+            shizukuDownload = null
+        }
     }
 
     // ---- the shell service ----

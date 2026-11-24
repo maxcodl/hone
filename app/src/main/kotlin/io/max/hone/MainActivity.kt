@@ -83,6 +83,11 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent { HoneTheme(hone.looks.look) { App(hone) } }
     }
+
+    override fun onResume() {
+        super.onResume()
+        hone.recheckShizuku()
+    }
 }
 
 private data class Tab(val title: String, val icon: ImageVector, val outline: ImageVector)
@@ -95,8 +100,20 @@ private val tabs = listOf(
     Tab("Network", Sym.Network, Sym.Network),
 )
 
-/** Asks for Shizuku: the permission when it runs, otherwise opens it. */
-fun Hone.connect() = if (access == Access.Ask) askPermission() else openShizuku()
+/** Asks for Shizuku: the permission when it runs, opens it when installed, otherwise installs it. */
+fun Hone.connect() = when {
+    access == Access.Ask -> askPermission()
+    shizukuInstalled -> openShizuku()
+    else -> installShizuku()
+}
+
+/** What [connect] will do, as a button label. */
+fun Hone.connectLabel(): String = when {
+    access == Access.Ask -> "Allow in Shizuku"
+    shizukuDownload != null -> "Downloading ${((shizukuDownload ?: 0f) * 100).toInt()}%"
+    shizukuInstalled -> "Open Shizuku"
+    else -> "Install Shizuku"
+}
 
 @Composable
 fun App(hone: Hone) {
@@ -254,8 +271,17 @@ private fun DotNav(selected: Int, onSelect: (Int) -> Unit) {
 fun NeedsShizuku(hone: Hone, title: String, text: String, modifier: Modifier = Modifier) {
     SectionCard(modifier) {
         CardHeader(Sym.Bolt, title, text, MaterialShapes.Sunny)
-        FilledTonalButton(onClick = { hone.connect() }, shapes = ButtonDefaults.shapes(), modifier = Modifier.align(Alignment.End)) {
-            Text(if (hone.access == Access.Ask) "Allow in Shizuku" else "Open Shizuku")
+        ShizukuButton(hone, Modifier.align(Alignment.End))
+    }
+}
+
+/** The one button that gets Shizuku going: install, open or allow, with download progress and errors. */
+@Composable
+fun ShizukuButton(hone: Hone, modifier: Modifier = Modifier) {
+    Column(modifier, horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        hone.shizukuError?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+        FilledTonalButton(onClick = { hone.connect() }, enabled = hone.shizukuDownload == null, shapes = ButtonDefaults.shapes()) {
+            Text(hone.connectLabel())
         }
     }
 }
@@ -281,19 +307,27 @@ private fun Gate(hone: Hone) {
         BigValue("Hone", MaterialTheme.typography.displayMediumEmphasized)
         Spacer(Modifier.size(12.dp))
         Text(
-            if (running) "Allow Hone in Shizuku for everything: cache cleaning, app optimisation and debloat."
-            else "Start Shizuku for everything Hone can do, or go on with what works without it.",
+            when {
+                running -> "Allow Hone in Shizuku for everything: cache cleaning, app optimisation and debloat."
+                hone.shizukuInstalled -> "Start Shizuku for everything Hone can do, or go on with what works without it."
+                else -> "Shizuku gives Hone shell rights for everything it can do. Install it from its GitHub page, or go on with what works without it."
+            },
             textAlign = TextAlign.Center,
             color = cs.onSurfaceVariant,
         )
         Spacer(Modifier.size(32.dp))
+        hone.shizukuError?.let {
+            Text(it, color = cs.error)
+            Spacer(Modifier.size(8.dp))
+        }
         Button(
             onClick = { hone.connect() },
+            enabled = hone.shizukuDownload == null,
             shapes = ButtonDefaults.shapes(),
             contentPadding = ButtonDefaults.contentPaddingFor(ButtonDefaults.MediumContainerHeight),
             modifier = Modifier.fillMaxWidth().height(ButtonDefaults.MediumContainerHeight),
         ) {
-            Text(if (running) "Allow" else "Open Shizuku", style = ButtonDefaults.textStyleFor(ButtonDefaults.MediumContainerHeight))
+            Text(if (running) "Allow" else hone.connectLabel(), style = ButtonDefaults.textStyleFor(ButtonDefaults.MediumContainerHeight))
         }
         Spacer(Modifier.size(12.dp))
         TextButton(onClick = { hone.useLimited(true) }, shapes = ButtonDefaults.shapes()) { Text("Continue without Shizuku") }

@@ -64,9 +64,9 @@ object Updater {
         return false
     }
 
-    /** The newest release, or null when the repo has none. Throws on a network failure. */
-    suspend fun latest(): Release? = withContext(Dispatchers.IO) {
-        val conn = URL("https://api.github.com/repos/$REPO/releases/latest").openConnection() as HttpURLConnection
+    /** The newest release of [repo], or null when it has none. Throws on a network failure. */
+    suspend fun latest(repo: String = REPO): Release? = withContext(Dispatchers.IO) {
+        val conn = URL("https://api.github.com/repos/$repo/releases/latest").openConnection() as HttpURLConnection
         try {
             conn.setRequestProperty("Accept", "application/vnd.github+json")
             conn.connectTimeout = 10_000; conn.readTimeout = 10_000
@@ -82,8 +82,8 @@ object Updater {
     private fun JsonObject.str(k: String) = this[k]?.jsonPrimitive?.content.orEmpty()
 
     /** Saves the APK into the cache folder the file provider shares; [progress] gets 0..1. */
-    suspend fun download(c: Context, url: String, progress: (Float) -> Unit): File = withContext(Dispatchers.IO) {
-        val out = File(c.cacheDir, "share/hone-update.apk").also { it.parentFile?.mkdirs() }
+    suspend fun download(c: Context, url: String, name: String = "hone-update.apk", progress: (Float) -> Unit): File = withContext(Dispatchers.IO) {
+        val out = File(c.cacheDir, "share/$name").also { it.parentFile?.mkdirs() }
         val conn = URL(url).openConnection() as HttpURLConnection
         try {
             conn.connectTimeout = 15_000; conn.readTimeout = 30_000
