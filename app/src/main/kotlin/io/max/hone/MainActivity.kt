@@ -98,8 +98,8 @@ private val tabs = listOf(
     Tab("Health", Sym.MonitorHeart, Sym.MonitorHeart),
     Tab("Battery", Sym.BatteryCharging, Sym.BatteryCharging),
     Tab("Storage", Sym.Storage, Sym.Storage),
-    Tab("Speed", Sym.Speed, Sym.Speed),
     Tab("Apps", Sym.Apps, Sym.Apps),
+    Tab("Network", Sym.Network, Sym.Network),
 )
 
 /** Asks for Shizuku: the permission when it runs, otherwise opens it. */
@@ -113,6 +113,7 @@ fun App(hone: Hone) {
     }
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var showLook by remember { mutableStateOf(false) }
+    var showAbout by remember { mutableStateOf(false) }
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val say: (String) -> Unit = { msg -> android.util.Log.i(TAG, "say: $msg"); scope.launch { snackbar.showSnackbar(msg) } }
@@ -121,6 +122,19 @@ fun App(hone: Hone) {
     val cs = MaterialTheme.colorScheme
 
     if (showLook) LookSheet(hone) { showLook = false }
+    if (showAbout) AboutSheet { showAbout = false }
+    // Asked once: most of Storage needs all files access, and the inline cards are easy to miss.
+    var askFiles by remember { mutableStateOf(!hone.canReadFiles() && !hone.prefs.getBoolean("filesAsked", false)) }
+    if (askFiles) {
+        val done = { askFiles = false; hone.prefs.edit().putBoolean("filesAsked", true).apply() }
+        Confirm(
+            "Allow all files access?",
+            "Hone uses it to measure folders, show previews and move unwanted files to its trash, where you can restore them. Nothing is deleted without asking.",
+            "Open settings",
+            onConfirm = { done(); hone.openFilesAccess() },
+            onDismiss = done,
+        )
+    }
 
     Scaffold(
         modifier = if (look.mono) Modifier else Modifier.nestedScroll(scroll.nestedScrollConnection),
@@ -132,7 +146,9 @@ fun App(hone: Hone) {
                     Spacer(Modifier.width(4.dp))
                     Text("CONNECT", style = MaterialTheme.typography.labelLarge)
                 }
+                if (tab == 4) IconButton(onClick = { hone.netLive = !hone.netLive }) { Icon(Sym.Timeline, "Live graph") }
                 IconButton(onClick = { showLook = true }) { Icon(Sym.Palette, "Look") }
+                IconButton(onClick = { showAbout = true }) { Icon(Sym.Info, "About") }
             } else LargeFlexibleTopAppBar(
                 title = { Text(if (look.mono) tabs[tab].title.uppercase() else tabs[tab].title) },
                 subtitle = { Text(if (hone.full) hone.deviceName else "${hone.deviceName}  ·  without Shizuku", maxLines = 1) },
@@ -144,7 +160,9 @@ fun App(hone: Hone) {
                             Text("Connect Shizuku")
                         }
                     }
+                    if (tab == 4) IconButton(onClick = { hone.netLive = !hone.netLive }, shapes = IconButtonDefaults.shapes()) { Icon(Sym.Timeline, "Live graph") }
                     IconButton(onClick = { showLook = true }, shapes = IconButtonDefaults.shapes()) { Icon(Sym.Palette, "Look") }
+                    IconButton(onClick = { showAbout = true }, shapes = IconButtonDefaults.shapes()) { Icon(Sym.Info, "About") }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = cs.surface, scrolledContainerColor = if (look.amoled) cs.surface else cs.surfaceContainer),
                 scrollBehavior = scroll,
@@ -184,8 +202,8 @@ fun App(hone: Hone) {
                 0 -> HealthScreen(hone, pad, say) { tab = it }
                 1 -> BatteryScreen(hone, pad, say)
                 2 -> StorageScreen(hone, pad, say)
-                3 -> SpeedScreen(hone, pad, say)
-                else -> AppsScreen(hone, pad, say)
+                3 -> AppsTab(hone, pad, say)
+                else -> NetworkScreen(hone, pad, say)
             }
             }
         }

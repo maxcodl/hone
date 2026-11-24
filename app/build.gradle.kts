@@ -13,6 +13,16 @@ val signing = rootProject.file("local.properties").takeIf { it.exists() }
     ?.getProperty("signing.file")?.let { path -> file(path).takeIf { it.exists() } }
     ?.let { f -> Properties().apply { f.inputStream().use(::load) } }
 
+// CI has no local.properties: it writes the key from secrets and names it in these variables.
+val ciSigning = System.getenv("HONE_KEYSTORE")?.let { path ->
+    Properties().apply {
+        setProperty("keystore.path", path)
+        setProperty("keystore.password", System.getenv("HONE_KEYSTORE_PASSWORD") ?: "")
+        setProperty("key.alias", System.getenv("HONE_KEY_ALIAS") ?: "")
+        setProperty("key.password", System.getenv("HONE_KEY_PASSWORD") ?: "")
+    }
+}
+
 val sdkDir: String = Properties().apply { rootProject.file("local.properties").takeIf { it.exists() }?.inputStream()?.use(::load) }
     .getProperty("sdk.dir") ?: System.getenv("ANDROID_HOME") ?: ""
 
@@ -44,19 +54,20 @@ android {
         applicationId = "io.max.hone"
         minSdk = 26
         targetSdk = 37
-        versionCode = 1
-        versionName = "0.1.0"
+        // CI passes -PversionName / -PversionCode on every release build; local builds keep these defaults.
+        versionCode = (findProperty("versionCode") as String?)?.toInt() ?: 1
+        versionName = (findProperty("versionName") as String?) ?: "0.1.0"
         ndk { abiFilters += "arm64-v8a" }
     }
     signingConfigs {
         // Debug and release share one key, so either installs over the other.
-        if (signing != null) {
+        (ciSigning ?: signing)?.let { sg ->
             for (name in listOf("debug", "release")) {
                 maybeCreate(name).apply {
-                    storeFile = file(signing.getProperty("keystore.path"))
-                    storePassword = signing.getProperty("keystore.password")
-                    keyAlias = signing.getProperty("key.alias")
-                    keyPassword = signing.getProperty("key.password")
+                    storeFile = file(sg.getProperty("keystore.path"))
+                    storePassword = sg.getProperty("keystore.password")
+                    keyAlias = sg.getProperty("key.alias")
+                    keyPassword = sg.getProperty("key.password")
                 }
             }
         }
