@@ -10,6 +10,7 @@ use std::fs;
 use std::hash::{Hash, Hasher};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Component, Path, PathBuf};
+use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const ROOT: &str = "/storage/emulated/0";
@@ -327,7 +328,8 @@ pub fn scan(root: &str, installed: &HashSet<String>) -> Value {
     })
 }
 
-pub fn ls(path: &str) -> Value {
+/// One folder's entries. `quick` skips measuring subfolders (`sized: false`), so the list shows at once.
+pub fn ls(path: &str, quick: bool) -> Value {
     let dir = Path::new(if path.is_empty() { ROOT } else { path });
     if !dir.starts_with("/storage/") || dir.starts_with("/storage/self") {
         return json!({ "error": "outside shared storage" });
@@ -343,16 +345,28 @@ pub fn ls(path: &str) -> Value {
             if m.file_type().is_symlink() {
                 continue;
             }
-            let (bytes, items) = if m.is_dir() { dir_size(&p) } else { (m.len(), 0) };
+            let sized = !(quick && m.is_dir());
+            let (bytes, items) = if !m.is_dir() { (m.len(), 0) } else if sized { dir_size(&p) } else { (0, 0) };
             entries.push(json!({
                 "path": p.to_string_lossy(), "name": e.file_name().to_string_lossy(),
                 "dir": m.is_dir(), "bytes": bytes, "items": items, "modified": mtime(&m),
-                "locked": safe(&p.to_string_lossy()).is_err(),
+                "locked": safe(&p.to_string_lossy()).is_err(), "sized": sized,
             }));
         }
     }
     entries.sort_by(|a, b| b["bytes"].as_u64().cmp(&a["bytes"].as_u64()));
     json!({ "path": dir.to_string_lossy(), "entries": entries })
+}
+
+/// Size and file count of each folder, measured side by side.
+pub fn du(paths: &[String]) -> Value {
+    let jobs: Vec<_> = paths
+        .iter()
+        .filter(|p| p.starts_with("/storage/") && !p.starts_with("/storage/self"))
+        .cloned()
+        .map(|p| thread::spawn(move || { let (b, n) = dir_size(Path::new(&p)); json!({ "path": p, "bytes": b, "items": n }) }))
+        .collect();
+    json!({ "sizes": jobs.into_iter().filter_map(|j| j.join().ok()).collect::<Vec<_>>() })
 }
 
 /// The path, resolved, if it may be moved to the trash; otherwise why not.
@@ -575,6 +589,12 @@ pub fn expire(days: &str) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn du_measures_only_shared_storage() {
+        let v = du(&["/etc".into(), "/storage/self/primary".into()]);
+        assert_eq!(v["sizes"].as_array().map(Vec::len), Some(0));
+    }
 
     #[test]
     fn refuses_unsafe_paths() {

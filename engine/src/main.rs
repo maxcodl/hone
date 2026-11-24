@@ -45,7 +45,8 @@ fn main() {
             r if r.starts_with("/storage/") && !r.starts_with("/storage/emulated") => files::scan(r, &HashSet::new()),
             r => json!({ "error": format!("not a volume: {r}") }),
         },
-        "ls" => files::ls(arg(rest, 0)),
+        "ls" => files::ls(arg(rest, 0), arg(rest, 1) == "quick"),
+        "du" => files::du(rest),
         "trash" => files::trash(rest),
         "trash-list" => files::trash_list(),
         "trash-restore" => files::restore(rest),
@@ -84,6 +85,8 @@ fn main() {
         "unarchive" => app_action(rest, &["request-unarchive"], ""),
         "restore" => change(rest, false),
         "grant-files" => output(run("appops", &["set", arg(rest, 0), "MANAGE_EXTERNAL_STORAGE", "allow"])),
+        // Makes Android fold the latest per-app traffic into its records, so a live view sees it now.
+        "net-poll" => { run("dumpsys", &["netstats", "--poll"]); json!({}) }
         "grant-usage" => output(run("appops", &["set", arg(rest, 0), "GET_USAGE_STATS", "allow"])),
         "reboot" => output(run("svc", &["power", "reboot"])),
         _ => json!({ "error": format!("unknown command '{cmd}'") }),
@@ -471,10 +474,23 @@ fn compile(rest: &[String]) -> Value {
             } else {
                 "other"
             };
-            json!({ "pkg": p, "ok": out.contains("Success") && fast, "status": status, "why": why, "output": out })
+            let detail = if why == "rejected" {
+                dex2oat_error(&run("logcat", &["-d", "-t", "200", "-s", "dex2oat64:E", "dex2oat32:E", "dex2oat:E"]), p)
+            } else {
+                String::new()
+            };
+            json!({ "pkg": p, "ok": out.contains("Success") && fast, "status": status, "why": why, "detail": detail, "output": out })
         })
         .collect();
     json!({ "results": results })
+}
+
+/// dex2oat's own last error for `pkg` from its log lines, without the long file path.
+fn dex2oat_error(log: &str, pkg: &str) -> String {
+    let line = log.lines().rev().find(|l| l.contains(&format!("/{pkg}-"))).unwrap_or("");
+    let msg = line.rsplit("': ").next().unwrap_or("");
+    let msg = if msg == line { line.split_once(": ").map_or("", |(_, m)| m).rsplit(": ").next().unwrap_or("") } else { msg };
+    msg.trim().chars().take(160).collect()
 }
 
 // ---- memory, cache, packages ----
@@ -641,5 +657,14 @@ mod tests {
     fn spots_a_build_without_cache_only() {
         assert!(super::unsupported_option("Error: Unknown option: --cache-only"));
         assert!(!super::unsupported_option("Failed"));
+    }
+
+    #[test]
+    fn reads_dex2oat_error_for_the_package() {
+        let log = "11-24 11:33:57.964 23595 23595 E dex2oat64: Failed to verify /data/app/~~x==/eu.darken.sdmse-J==/base.apk!4: Failure to verify dex file '/data/app/~~x==/eu.darken.sdmse-J==/base.apk!4': Offset(1233428) should be zero when size is zero for class-defs.\n\
+                   11-24 11:34:00.000 1 1 E dex2oat64: Failed to verify /data/app/~~y==/com.other-K==/base.apk: boom";
+        assert_eq!(super::dex2oat_error(log, "eu.darken.sdmse"), "Offset(1233428) should be zero when size is zero for class-defs.");
+        assert_eq!(super::dex2oat_error(log, "com.other"), "boom");
+        assert_eq!(super::dex2oat_error(log, "com.none"), "");
     }
 }
