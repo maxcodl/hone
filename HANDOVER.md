@@ -34,6 +34,11 @@ State on 20 Nov 2026.
 - **Speed section (Apps tab):** speed test (`bench`, run as Hone in its cache dir; previous run kept for comparison), Display (animations, top refresh rate, text size via `set-display`, whitelisted keys and ranges), Overnight upkeep (`Night.kt`, JobScheduler: charging + idle, 23:00-07:00).
 - **Quick Settings tiles** Free memory and Optimise apps, **home screen widget** (battery / storage / memory, Dot look), in `Tiles.kt`.
 
+## Added 24 Nov (not built yet)
+
+- **Settings page** (`Settings.kt`): one gear button replaces the Look and About buttons. Full page with Look, Alerts, Shizuku status and About (update check). Back closes it.
+- **New app online** (`NetWatch.kt`): opt-in; JobScheduler every 15 min diffs per-UID records (`NetworkStatsManager`) against the UIDs seen so far and notifies with the app icon and Wi-Fi / mobile. Turning on seeds every UID already in the records. Records come in 2 h blocks and are saved late, so alerts can lag an hour or two.
+
 ## Known gaps
 
 - Checked on the phone: drain (21 apps), wake-ups, privacy (49 apps, own apps first), startup switch (fallback, undone after), speed test, display chips (120.1 Hz and 0.85 text match), similar photos (135 found in about 90 s), `pm clear --cache-only` and `set-package-networking-enabled` both supported. Other OEM builds may still format dumpsys differently.
