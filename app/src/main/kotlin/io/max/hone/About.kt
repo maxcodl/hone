@@ -9,18 +9,15 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -130,9 +127,9 @@ private sealed interface UpdateState {
     data class Failed(val why: String) : UpdateState
 }
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-fun AboutSheet(onClose: () -> Unit) {
+fun AboutSection() {
     val context = LocalContext.current
     val cs = MaterialTheme.colorScheme
     val scope = rememberCoroutineScope()
@@ -157,51 +154,47 @@ fun AboutSheet(onClose: () -> Unit) {
         }
     }
 
-    ModalBottomSheet(onDismissRequest = onClose, containerColor = sheetColor()) {
-        Column(Modifier.padding(horizontal = 20.dp).navigationBarsPadding(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("About", style = MaterialTheme.typography.headlineSmallEmphasized)
-            SectionCard {
-                CardHeader(Sym.Info, "Hone ${Updater.installed(context)}", "Phone tune-up for Android, with a small Rust engine.")
-                when (val s = state) {
-                    UpdateState.Idle -> Unit
-                    UpdateState.Checking -> Text("Checking GitHub…", color = cs.onSurfaceVariant)
-                    UpdateState.Current -> Text("You have the latest version.", color = cs.onSurfaceVariant)
-                    is UpdateState.Found -> {
-                        Text("${s.r.version} is available.", style = MaterialTheme.typography.titleSmall)
-                        if (s.r.notes.isNotBlank()) Text(s.r.notes.take(600), style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
-                    }
-                    is UpdateState.Downloading -> LinearProgressIndicator(progress = { s.p }, modifier = Modifier.fillMaxWidth())
-                    is UpdateState.Ready -> Text("Downloaded. Android asks before it installs.", color = cs.onSurfaceVariant)
-                    is UpdateState.Failed -> Text(s.why, color = cs.error)
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        SectionCard {
+            CardHeader(Sym.Info, "Hone ${Updater.installed(context)}", "Phone tune-up for Android, with a small Rust engine.")
+            when (val s = state) {
+                UpdateState.Idle -> Unit
+                UpdateState.Checking -> Text("Checking GitHub…", color = cs.onSurfaceVariant)
+                UpdateState.Current -> Text("You have the latest version.", color = cs.onSurfaceVariant)
+                is UpdateState.Found -> {
+                    Text("${s.r.version} is available.", style = MaterialTheme.typography.titleSmall)
+                    if (s.r.notes.isNotBlank()) Text(s.r.notes.take(600), style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
                 }
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
-                    TextButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(Updater.PAGE)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }) { Text("GitHub") }
-                    FilledTonalButton(
-                        enabled = !busy,
-                        shapes = ButtonDefaults.shapes(),
-                        onClick = {
-                            when (val s = state) {
-                                is UpdateState.Found -> get(s.r)
-                                is UpdateState.Ready -> Updater.install(context, s.apk)
-                                else -> check()
-                            }
-                        },
-                    ) {
-                        Icon(Sym.Download, null, Modifier.size(18.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text(when (state) { is UpdateState.Found -> "Download"; is UpdateState.Ready -> "Install"; else -> "Check for update" })
-                    }
+                is UpdateState.Downloading -> LinearProgressIndicator(progress = { s.p }, modifier = Modifier.fillMaxWidth())
+                is UpdateState.Ready -> Text("Downloaded. Android asks before it installs.", color = cs.onSurfaceVariant)
+                is UpdateState.Failed -> Text(s.why, color = cs.error)
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
+                TextButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(Updater.PAGE)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }) { Text("GitHub") }
+                FilledTonalButton(
+                    enabled = !busy,
+                    shapes = ButtonDefaults.shapes(),
+                    onClick = {
+                        when (val s = state) {
+                            is UpdateState.Found -> get(s.r)
+                            is UpdateState.Ready -> Updater.install(context, s.apk)
+                            else -> check()
+                        }
+                    },
+                ) {
+                    Icon(Sym.Download, null, Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(when (state) { is UpdateState.Found -> "Download"; is UpdateState.Ready -> "Install"; else -> "Check for update" })
                 }
             }
-            // Themed filled glyphs: they take the colours of whichever look is on.
-            Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-                val mono = MaterialTheme.typography.labelLarge.copy(fontFamily = FontFamily.Monospace)
-                Text("Made by Max with ", style = mono, color = cs.onSurfaceVariant)
-                Icon(Sym.Heart, "love", Modifier.size(20.dp), tint = cs.primary)
-                Text(" and ", style = mono, color = cs.onSurfaceVariant)
-                Icon(Sym.Coffee, "coffee", Modifier.size(20.dp), tint = cs.tertiary)
-            }
-            Spacer(Modifier.size(12.dp))
+        }
+        // Themed filled glyphs: they take the colours of whichever look is on.
+        Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+            val mono = MaterialTheme.typography.labelLarge.copy(fontFamily = FontFamily.Monospace)
+            Text("Made by Max with ", style = mono, color = cs.onSurfaceVariant)
+            Icon(Sym.Heart, "love", Modifier.size(20.dp), tint = cs.primary)
+            Text(" and ", style = mono, color = cs.onSurfaceVariant)
+            Icon(Sym.Coffee, "coffee", Modifier.size(20.dp), tint = cs.tertiary)
         }
     }
 }

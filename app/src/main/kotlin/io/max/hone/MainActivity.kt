@@ -15,7 +15,6 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -37,11 +36,8 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.sp
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledTonalButton
@@ -51,15 +47,12 @@ import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.LargeFlexibleTopAppBar
 import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.ShortNavigationBar
 import androidx.compose.material3.ShortNavigationBarDefaults
 import androidx.compose.material3.ShortNavigationBarItem
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
@@ -112,8 +105,7 @@ fun App(hone: Hone) {
         return
     }
     var tab by rememberSaveable { mutableIntStateOf(0) }
-    var showLook by remember { mutableStateOf(false) }
-    var showAbout by remember { mutableStateOf(false) }
+    var showSettings by rememberSaveable { mutableStateOf(false) }
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val say: (String) -> Unit = { msg -> android.util.Log.i(TAG, "say: $msg"); scope.launch { snackbar.showSnackbar(msg) } }
@@ -121,8 +113,10 @@ fun App(hone: Hone) {
     val look = LocalLook.current
     val cs = MaterialTheme.colorScheme
 
-    if (showLook) LookSheet(hone) { showLook = false }
-    if (showAbout) AboutSheet { showAbout = false }
+    if (showSettings) {
+        SettingsPage(hone) { showSettings = false }
+        return
+    }
     // Asked once: most of Storage needs all files access, and the inline cards are easy to miss.
     var askFiles by remember { mutableStateOf(!hone.canReadFiles() && !hone.prefs.getBoolean("filesAsked", false)) }
     if (askFiles) {
@@ -147,8 +141,7 @@ fun App(hone: Hone) {
                     Text("CONNECT", style = MaterialTheme.typography.labelLarge)
                 }
                 if (tab == 4) IconButton(onClick = { hone.netLive = !hone.netLive }) { Icon(Sym.Timeline, "Live graph") }
-                IconButton(onClick = { showLook = true }) { Icon(Sym.Palette, "Look") }
-                IconButton(onClick = { showAbout = true }) { Icon(Sym.Info, "About") }
+                IconButton(onClick = { showSettings = true }) { Icon(Sym.Settings, "Settings") }
             } else LargeFlexibleTopAppBar(
                 title = { Text(if (look.mono) tabs[tab].title.uppercase() else tabs[tab].title) },
                 subtitle = { Text(if (hone.full) hone.deviceName else "${hone.deviceName}  ·  without Shizuku", maxLines = 1) },
@@ -161,8 +154,7 @@ fun App(hone: Hone) {
                         }
                     }
                     if (tab == 4) IconButton(onClick = { hone.netLive = !hone.netLive }, shapes = IconButtonDefaults.shapes()) { Icon(Sym.Timeline, "Live graph") }
-                    IconButton(onClick = { showLook = true }, shapes = IconButtonDefaults.shapes()) { Icon(Sym.Palette, "Look") }
-                    IconButton(onClick = { showAbout = true }, shapes = IconButtonDefaults.shapes()) { Icon(Sym.Info, "About") }
+                    IconButton(onClick = { showSettings = true }, shapes = IconButtonDefaults.shapes()) { Icon(Sym.Settings, "Settings") }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = cs.surface, scrolledContainerColor = if (look.amoled) cs.surface else cs.surfaceContainer),
                 scrollBehavior = scroll,
@@ -264,56 +256,6 @@ fun NeedsShizuku(hone: Hone, title: String, text: String, modifier: Modifier = M
         CardHeader(Sym.Bolt, title, text, MaterialShapes.Sunny)
         FilledTonalButton(onClick = { hone.connect() }, shapes = ButtonDefaults.shapes(), modifier = Modifier.align(Alignment.End)) {
             Text(if (hone.access == Access.Ask) "Allow in Shizuku" else "Open Shizuku")
-        }
-    }
-}
-
-@Composable
-private fun LookSheet(hone: Hone, onClose: () -> Unit) {
-    val current = hone.looks.look
-    val cs = MaterialTheme.colorScheme
-    ModalBottomSheet(onDismissRequest = onClose, containerColor = sheetColor()) {
-        Column(Modifier.padding(horizontal = 20.dp).navigationBarsPadding(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("Look", style = MaterialTheme.typography.headlineSmallEmphasized)
-            Style.entries.forEach { s ->
-                val selected = current.style == s
-                Card(
-                    shape = RoundedCornerShape(24.dp),
-                    colors = CardDefaults.cardColors(containerColor = if (selected) cs.secondaryContainer else cs.surfaceContainer),
-                    border = if (selected) BorderStroke(2.dp, cs.primary) else null,
-                    modifier = Modifier.fillMaxWidth().clickable { hone.looks.set(current.copy(style = s)) },
-                ) {
-                    Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                        // A live sample of the style, drawn by the real components.
-                        CompositionLocalProvider(LocalLook provides current.copy(style = s)) {
-                            Ring(0.7f, Modifier.size(64.dp), 7.dp, listOf(cs.primary, cs.tertiary), cs.surfaceContainerHighest) {
-                                BigValue("70", MaterialTheme.typography.titleMedium)
-                            }
-                        }
-                        Spacer(Modifier.width(16.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text(s.title, style = MaterialTheme.typography.titleMedium)
-                            Text(s.blurb, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
-                        }
-                        RadioButton(selected = selected, onClick = { hone.looks.set(current.copy(style = s)) })
-                    }
-                }
-            }
-            Row(
-                Modifier.fillMaxWidth().clickable { hone.looks.set(current.copy(amoled = !current.amoled)) }.padding(vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text("AMOLED black", style = MaterialTheme.typography.titleMedium)
-                    Text("Pure black everywhere. Saves power on this OLED screen and turns dark mode on.", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
-                }
-                Spacer(Modifier.width(12.dp))
-                Switch(checked = current.amoled, onCheckedChange = { hone.looks.set(current.copy(amoled = it)) })
-            }
-            if (hone.limited && hone.full) {
-                TextButton(onClick = { hone.useLimited(false) }) { Text("Shizuku is connected: full mode is on") }
-            }
-            Spacer(Modifier.height(12.dp))
         }
     }
 }
