@@ -5,7 +5,7 @@ State on 20 Nov 2026.
 ## Where things are
 
 - Version 0.1.0, release builds signed with the odo key (path in `local.properties` through `signing.file`).
-- Five tabs: Health, Battery, Storage (Clean / Files / Apps sections), Speed, Apps (Debloat / Installed / Privacy / Startup).
+- Five tabs: Health, Battery, Storage (Clean / Files / Apps sections), Apps (Speed / Apps switch; Apps has Debloat / Installed / Privacy / Startup), Network.
 - Default look is Dot. Calm and Expressive remain in the palette sheet.
 - `graphify-out/` holds a code graph (`GRAPH_REPORT.md`, `graph.html`); ignored by git. Rebuild with `/graphify . --update`.
 
@@ -29,7 +29,9 @@ State on 20 Nov 2026.
 - **Apps tab:** Privacy (`privacy`: `dumpsys appops --op X` for camera, mic, location, clipboard; `revoke`), Startup (boot receivers from PackageManager; `autostart-off/on` via `pm disable` / `pm default-state`).
 - **App sheet:** Freeze (`pm suspend`), Block internet (`cmd connectivity set-package-networking-enabled`, Android 14+, lasts until restart), Internet sort (NetworkStatsManager, needs usage access).
 - **Cleanup groups:** WhatsApp media (sent / received sections), Telegram media, screenshots older than 30 days, similar photos (on demand, Kotlin dHash of MediaStore thumbnails, `Media.kt`).
-- **Speed tab:** speed test (`bench`, run as Hone in its cache dir; previous run kept for comparison), Display (animations, top refresh rate, text size via `set-display`, whitelisted keys and ranges), Overnight upkeep (`Night.kt`, JobScheduler: charging + idle, 23:00-07:00).
+- **Network tab** (`NetworkScreen.kt`, `Net.kt`): Android's data-use records via usage access. Day bars are the phone's hourly totals; per-app numbers come in ~2 h blocks. Live line is `TrafficStats` per second; app icons on it come from diffing per-app totals, with `net-poll` (`dumpsys netstats --poll`) every 3 s under Shizuku, every 15 s without.
+- **Compile reasons:** `compile` returns `detail`, dex2oat's own error from logcat. Failures are kept per app version in pref `cantCompile2`; unknown reasons are not kept.
+- **Speed section (Apps tab):** speed test (`bench`, run as Hone in its cache dir; previous run kept for comparison), Display (animations, top refresh rate, text size via `set-display`, whitelisted keys and ranges), Overnight upkeep (`Night.kt`, JobScheduler: charging + idle, 23:00-07:00).
 - **Quick Settings tiles** Free memory and Optimise apps, **home screen widget** (battery / storage / memory, Dot look), in `Tiles.kt`.
 
 ## Known gaps
