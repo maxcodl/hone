@@ -52,7 +52,7 @@ import androidx.graphics.shapes.RoundedPolygon
 import kotlinx.coroutines.launch
 
 @Composable
-fun SpeedScreen(hone: Hone, pad: PaddingValues, say: (String) -> Unit) {
+fun SpeedScreen(hone: Hone, pad: PaddingValues, say: (String) -> Unit, top: androidx.compose.foundation.lazy.LazyListScope.() -> Unit = {}) {
     val scope = rememberCoroutineScope()
     var busy by remember { mutableStateOf<String?>(null) }
     var askReboot by remember { mutableStateOf(false) }
@@ -98,6 +98,7 @@ fun SpeedScreen(hone: Hone, pad: PaddingValues, say: (String) -> Unit) {
     val basic = d?.let { x -> x.counts.filterKeys { it in setOf("verify", "run-from-apk", "extract") }.values.sum() } ?: 0
 
     LazyColumn(contentPadding = pad + 16.dp, verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        top()
         if (!hone.full) item(key = "needs") {
             NeedsShizuku(
                 hone, "More with Shizuku",
@@ -232,16 +233,27 @@ fun SpeedScreen(hone: Hone, pad: PaddingValues, say: (String) -> Unit) {
                     Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
                         AppIcon(hone, pkg, 44.dp)
                         Spacer(Modifier.width(14.dp))
-                        Text(hone.label(pkg), Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium)
+                        Column(Modifier.weight(1f)) {
+                            Text(hone.label(pkg), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium)
+                            val why = when {
+                                pkg in compiling -> null
+                                pkg in debugBuilds -> "Android never compiles debug builds"
+                                hone.failedCompile[pkg] == "rejected" -> hone.compileDetail[pkg]?.let { "Android's compiler: $it" } ?: "Android's compiler refused its code"
+                                hone.failedCompile[pkg] == "play" -> "Runs from a file Play supplied; Android keeps it"
+                                pkg in hone.failedCompile -> "Android gave no reason"
+                                else -> null
+                            }
+                            if (why != null) Text(why, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                        }
                         if (pkg in compiling) {
                             LoadingIndicator(Modifier.size(40.dp))
                         } else if (pkg in debugBuilds || pkg in hone.failedCompile) {
                             Text(
                                 when {
                                     pkg in debugBuilds -> "Debug build"
-                                    hone.failedCompile[pkg] == "rejected" -> "Broken by developer"
-                                    hone.failedCompile[pkg] == "play" -> "Uses Play's file"
-                                    else -> "Can't compile"
+                                    hone.failedCompile[pkg] == "rejected" -> "Faulty code"
+                                    hone.failedCompile[pkg] == "play" -> "Play's file"
+                                    else -> "Not compiled"
                                 },
                                 style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant,
                                 modifier = Modifier.padding(end = 12.dp),

@@ -58,6 +58,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withPermit
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -72,6 +73,9 @@ private sealed interface Page {
 @Composable
 fun FilesScreen(hone: Hone, pad: PaddingValues, say: (String) -> Unit, top: androidx.compose.foundation.lazy.LazyListScope.() -> Unit = {}) {
     var page by remember { mutableStateOf<Page>(Page.Overview) }
+    // Measured folders and scroll spots, kept so going back does not measure again.
+    val listings = remember { androidx.compose.runtime.mutableStateMapOf<String, Listing>() }
+    val scrolls = remember { mutableMapOf<String, androidx.compose.foundation.lazy.LazyListState>() }
     var allowed by remember { mutableStateOf(hone.filesAllowed()) }
     val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
     LaunchedEffect(lifecycle) {
@@ -109,7 +113,7 @@ fun FilesScreen(hone: Hone, pad: PaddingValues, say: (String) -> Unit, top: andr
     when (val p = page) {
         Page.Overview -> Overview(hone, pad, say, top, open = { page = it })
         is Page.Group -> GroupPage(hone, pad, p.id, say) { page = Page.Overview }
-        is Page.Browse -> BrowsePage(hone, pad, p.path, say, open = { page = Page.Browse(it) }, up = {
+        is Page.Browse -> BrowsePage(hone, pad, p.path, listings, scrolls.getOrPut(p.path) { androidx.compose.foundation.lazy.LazyListState() }, say, open = { page = Page.Browse(it) }, up = {
             page = if (p.path == ROOT || p.path.count { it == '/' } <= 2) Page.Overview else Page.Browse(p.path.substringBeforeLast('/'))
         })
         Page.Trash -> TrashPage(hone, pad, say) { page = Page.Overview }
@@ -315,18 +319,38 @@ private fun GroupPage(hone: Hone, pad: PaddingValues, id: String, say: (String) 
 }
 
 @Composable
-private fun BrowsePage(hone: Hone, pad: PaddingValues, path: String, say: (String) -> Unit, open: (String) -> Unit, up: () -> Unit) {
-    var listing by remember(path) { mutableStateOf<Listing?>(null) }
+private fun BrowsePage(
+    hone: Hone, pad: PaddingValues, path: String, listings: MutableMap<String, Listing>, state: androidx.compose.foundation.lazy.LazyListState,
+    say: (String) -> Unit, open: (String) -> Unit, up: () -> Unit,
+) {
+    val listing = listings[path]
     val chosen = remember(path) { mutableStateListOf<String>() }
-    val scope = rememberCoroutineScope()
-    suspend fun load() { listing = runCatching { hone.call<Listing>("ls", path) }.getOrElse { Listing(path, error = it.message) } }
+    // Names first, at once; then each folder is measured on its own and its size fills in as it finishes.
+    suspend fun load() {
+        val known = listings[path]
+        if (known == null || known.error != null) {
+            listings[path] = runCatching { hone.call<Listing>("ls", path, "quick") }.getOrElse { Listing(path, error = it.message) }
+        }
+        val todo = listings[path]?.entries.orEmpty().filter { !it.sized }
+        if (todo.isEmpty()) return
+        val gate = kotlinx.coroutines.sync.Semaphore(4)
+        kotlinx.coroutines.coroutineScope {
+            todo.forEach { e ->
+                launch {
+                    val s = gate.withPermit { runCatching { hone.call<DirSizes>("du", e.path).sizes.firstOrNull() }.getOrNull() } ?: return@launch
+                    listings[path]?.let { l -> listings[path] = l.copy(entries = l.entries.map { if (it.path == s.path) it.copy(bytes = s.bytes, items = s.items, sized = true) else it }) }
+                }
+            }
+        }
+        listings[path]?.let { l -> listings[path] = l.copy(entries = l.entries.sortedByDescending { it.bytes }) }
+    }
     LaunchedEffect(path) { load() }
     val entries = listing?.entries.orEmpty()
     val chosenBytes = entries.filter { it.path in chosen }.sumOf { it.bytes }
 
 
     Box(Modifier.fillMaxSize()) {
-        LazyColumn(contentPadding = pad + 16.dp, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        LazyColumn(state = state, contentPadding = pad + 16.dp, verticalArrangement = Arrangement.spacedBy(8.dp)) {
             item(key = "head") {
                 SectionCard {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -336,17 +360,17 @@ private fun BrowsePage(hone: Hone, pad: PaddingValues, path: String, say: (Strin
                             Text(if (path == ROOT) "Internal storage" else if (path.count { it == '/' } == 2) "SD card" else path.substringAfterLast('/'), style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Text(path.removePrefix(ROOT).ifEmpty { "/" }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
-                        if (listing != null) Text(bytes(entries.sumOf { it.bytes }), style = MaterialTheme.typography.titleSmall)
+                        if (listing != null) Text(if (entries.all { it.sized }) bytes(entries.sumOf { it.bytes }) else "…", style = MaterialTheme.typography.titleSmall)
                     }
                 }
             }
             when {
-                listing == null -> item { Loading(PaddingValues(32.dp), "Measuring") }
+                listing == null -> item { Loading(PaddingValues(32.dp), "Opening") }
                 entries.isEmpty() -> item { Text(listing?.error ?: "Empty folder", Modifier.padding(24.dp), color = MaterialTheme.colorScheme.onSurfaceVariant) }
             }
             items(entries, key = { it.path }) { e ->
                 FileRow(
-                    e.path, e.bytes, e.modified, dir = e.dir, items = e.items, locked = e.locked,
+                    e.path, e.bytes, e.modified, dir = e.dir, items = e.items, locked = e.locked, sized = e.sized, modifier = Modifier.animateItem(),
                     selected = if (e.locked) null else e.path in chosen,
                     onToggle = if (e.locked) null else ({ if (e.path in chosen) chosen.remove(e.path) else chosen.add(e.path) }),
                     onClick = if (e.dir) ({ open(e.path) }) else null,
@@ -354,7 +378,11 @@ private fun BrowsePage(hone: Hone, pad: PaddingValues, path: String, say: (Strin
             }
             item { Spacer(Modifier.height(80.dp)) }
         }
-        TrashBar(hone, chosen, chosenBytes, say, Modifier.align(Alignment.BottomCenter).padding(pad)) { load() }
+        TrashBar(hone, chosen, chosenBytes, say, Modifier.align(Alignment.BottomCenter).padding(pad)) {
+            // Sizes of this folder and every folder above it changed.
+            listings.keys.filter { path == it || path.startsWith("$it/") }.forEach { listings.remove(it) }
+            load()
+        }
     }
 }
 
@@ -519,6 +547,7 @@ private fun FileRow(
     dir: Boolean = false,
     items: Long = 0,
     locked: Boolean = false,
+    sized: Boolean = true,
     selected: Boolean?,
     onToggle: (() -> Unit)?,
     onClick: (() -> Unit)? = null,
@@ -543,8 +572,8 @@ private fun FileRow(
                 Text(name, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyLarge)
                 Text(
                     listOfNotNull(
-                        bytes(size),
-                        if (dir) "$items files" else null,
+                        if (sized) bytes(size) else "Measuring…",
+                        if (dir && sized) "$items files" else null,
                         modified.takeIf { it > 0 }?.let { date(it) },
                         path.substringBeforeLast('/').removePrefix(ROOT).removePrefix("/").takeIf { !dir && it.isNotEmpty() },
                     ).joinToString("  ·  "),
@@ -552,7 +581,8 @@ private fun FileRow(
                 )
             }
             when {
-                locked -> Icon(Sym.Lock, "Protected", Modifier.padding(12.dp).size(18.dp), tint = cs.outline)
+                // Hone never moves these folders themselves; everything inside them can still be picked.
+                locked -> Pill(if (name == "Android" || path.contains("/Android/")) "System" else "Main folder")
                 selected != null && onToggle != null -> Checkbox(checked = selected, onCheckedChange = { onToggle() })
             }
         }

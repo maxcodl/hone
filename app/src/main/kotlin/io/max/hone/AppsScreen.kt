@@ -46,7 +46,7 @@ private val filters = listOf("Safe", "Caution", "Removed")
 private val modes = listOf("Debloat", "Installed", "Privacy", "Startup")
 
 @Composable
-fun AppsScreen(hone: Hone, pad: PaddingValues, say: (String) -> Unit) {
+fun AppsScreen(hone: Hone, pad: PaddingValues, say: (String) -> Unit, top: androidx.compose.foundation.lazy.LazyListScope.() -> Unit = {}) {
     var pkgs by remember { mutableStateOf<List<Pkg>?>(null) }
     var filter by rememberSaveable { mutableIntStateOf(0) }
     var working by remember { mutableStateOf<String?>(null) }
@@ -118,13 +118,17 @@ fun AppsScreen(hone: Hone, pad: PaddingValues, say: (String) -> Unit) {
         })
     }
 
-    val list = pkgs ?: return Loading(pad, "Listing preinstalled apps")
+    val list = pkgs ?: return LazyColumn(contentPadding = pad + 16.dp, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        top()
+        item { Loading(PaddingValues(32.dp), "Listing preinstalled apps") }
+    }
     val safe = list.filter { it.tag == "safe" && it.state != "removed" }
     val caution = list.filter { it.tag == "caution" && it.state != "removed" }
     val removed = list.filter { it.state == "removed" }
     val shown = listOf(safe, caution, removed)[filter].sortedBy { hone.label(it.pkg).lowercase() }
 
     LazyColumn(contentPadding = pad + 16.dp, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        top()
         item(key = "hero") {
             HeroCard(MaterialShapes.Pentagon, MaterialShapes.Clover8Leaf, Modifier.enter(0)) {
                 Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -233,4 +237,23 @@ private fun Stat(n: Int, label: String, dot: Color, modifier: Modifier) {
         Counter(n, MaterialTheme.typography.displaySmallEmphasized, color = MaterialTheme.colorScheme.onPrimaryContainer)
         Pill(label, dot, MaterialTheme.colorScheme.surface.copy(alpha = 0.55f))
     }
+}
+
+/** Speed and app tools under one tab, switched by a two-button row at the top of each list. */
+@Composable
+fun AppsTab(hone: Hone, pad: PaddingValues, say: (String) -> Unit) {
+    val top: androidx.compose.foundation.lazy.LazyListScope.() -> Unit = {
+        item(key = "appsSection") {
+            val labels = listOf("Speed", "Apps")
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(ButtonGroupDefaults.ConnectedSpaceBetween)) {
+                labels.forEachIndexed { i, label ->
+                    ToggleButton(
+                        checked = hone.appsSection == i, onCheckedChange = { hone.appsSection = i }, modifier = Modifier.weight(1f),
+                        shapes = if (i == 0) ButtonGroupDefaults.connectedLeadingButtonShapes() else ButtonGroupDefaults.connectedTrailingButtonShapes(),
+                    ) { Text(label) }
+                }
+            }
+        }
+    }
+    if (hone.appsSection == 0) SpeedScreen(hone, pad, say, top) else AppsScreen(hone, pad, say, top)
 }

@@ -87,24 +87,12 @@ data class DataUse(val mobile: Long, val wifi: Long) {
 }
 
 suspend fun dataUsage(context: Context): Map<String, DataUse> = withContext(Dispatchers.IO) {
-    val nsm = context.getSystemService(NetworkStatsManager::class.java)
-    val pm = context.packageManager
     val now = System.currentTimeMillis()
-    val from = now - 30L * 86_400_000
-    val byUid = HashMap<Int, LongArray>()
-    for ((type, slot) in listOf(ConnectivityManager.TYPE_MOBILE to 0, ConnectivityManager.TYPE_WIFI to 1)) {
-        val stats = runCatching { nsm.querySummary(type, null, from, now) }.getOrNull() ?: continue
-        val b = NetworkStats.Bucket()
-        while (stats.hasNextBucket()) {
-            stats.getNextBucket(b)
-            byUid.getOrPut(b.uid) { LongArray(2) }[slot] += b.rxBytes + b.txBytes
-        }
-        stats.close()
-    }
+    val pm = context.packageManager
     buildMap {
-        for ((uid, v) in byUid) {
+        for ((uid, t) in Net.byUid(context, now - 30L * 86_400_000, now)) {
             val pkg = pm.getPackagesForUid(uid)?.firstOrNull() ?: continue
-            put(pkg, DataUse(v[0], v[1]))
+            put(pkg, DataUse(t.mobile, t.wifi))
         }
     }
 }

@@ -69,7 +69,7 @@ import kotlin.coroutines.resume
 @Serializable data class Freed(val freed: Long = 0, val free: Long = 0, val available: Long = 0, val apps: Int = 0)
 @Serializable data class Pkg(val pkg: String, val tag: String, val note: String, val state: String)
 @Serializable data class Pkgs(val packages: List<Pkg> = emptyList())
-@Serializable data class Changed(val ok: Boolean = false, val output: String = "", val status: String = "", val why: String = "")
+@Serializable data class Changed(val ok: Boolean = false, val output: String = "", val status: String = "", val why: String = "", val detail: String = "")
 @Serializable data class Compiled(val results: List<Changed> = emptyList())
 @Serializable data class CacheResult(val cleared: Int = 0, val failed: Int = 0, val stuck: Boolean = false, val error: String? = null, val unsupported: Boolean = false)
 @Serializable data class DrainApp(val pkg: String, val mah: Double = 0.0, val pct: Double = 0.0, val awakeMs: Long = 0, val wakeups: Long = 0)
@@ -99,7 +99,9 @@ data class Breakdown(val images: Long, val video: Long, val audio: Long, val app
     val groups: List<CleanGroup> = emptyList(),
     val trash: Long = 0,
 )
-@Serializable data class Entry(val path: String, val name: String, val dir: Boolean, val bytes: Long = 0, val items: Long = 0, val modified: Long = 0, val locked: Boolean = false)
+@Serializable data class Entry(val path: String, val name: String, val dir: Boolean, val bytes: Long = 0, val items: Long = 0, val modified: Long = 0, val locked: Boolean = false, val sized: Boolean = true)
+@Serializable data class DirSize(val path: String = "", val bytes: Long = 0, val items: Long = 0)
+@Serializable data class DirSizes(val sizes: List<DirSize> = emptyList())
 @Serializable data class Listing(val path: String = "", val entries: List<Entry> = emptyList(), val error: String? = null)
 @Serializable data class TrashError(val path: String = "", val error: String = "")
 @Serializable data class Trashed(val moved: Int = 0, val bytes: Long = 0, val gone: Int = 0, val errors: List<TrashError> = emptyList()) {
@@ -131,7 +133,7 @@ class Hone(private val context: Context) {
         private set
 
     val looks = LookStore(context)
-    private val prefs = context.getSharedPreferences("mode", Context.MODE_PRIVATE)
+    val prefs = context.getSharedPreferences("mode", Context.MODE_PRIVATE)
 
     /** The user chose to go on without Shizuku; everything that needs the shell is hidden or explained. */
     var limited by mutableStateOf(prefs.getBoolean("limited", false))
@@ -466,6 +468,10 @@ class Hone(private val context: Context) {
 
     /** Which part of the Storage tab is open: 0 clean, 1 files, 2 apps. */
     var storageSection by mutableStateOf(0)
+    /** Apps tab: 0 speed, 1 app tools. */
+    var appsSection by mutableStateOf(0)
+    /** Network tab: the detailed live view is open. */
+    var netLive by mutableStateOf(false)
 
     /** Total size of installed apps, from the last app-size reading, for the space breakdown. */
     var appsBytes by mutableStateOf(0L)
@@ -617,11 +623,21 @@ class Hone(private val context: Context) {
     fun fastCount(d: Dexopt?) = d?.counts?.filterKeys { it in setOf("speed-profile", "speed", "everything") }?.values?.sum() ?: 0
 
     /** Apps a full compile did not take on (broken install, no code); remembered per version, not retried. */
-    val failedCompile = androidx.compose.runtime.mutableStateMapOf<String, String>().apply {
-        prefs.getStringSet("cantCompile", emptySet()).orEmpty().forEach { entry ->
+    val failedCompile = androidx.compose.runtime.mutableStateMapOf<String, String>()
+
+    /** dex2oat's own words for why it refused an app, when it said any. */
+    val compileDetail = androidx.compose.runtime.mutableStateMapOf<String, String>()
+
+    init {
+        // Entries are pkg@version#why#detail; an unknown reason is never kept, so it is tried again next time.
+        prefs.getStringSet("cantCompile2", emptySet()).orEmpty().forEach { entry ->
             val pkg = entry.substringBefore('@')
             val ver = entry.substringAfter('@').substringBefore('#').toLongOrNull()
-            if (ver != null && versionOf(pkg) == ver) put(pkg, entry.substringAfter('#', "other"))
+            val rest = entry.substringAfter('#', "")
+            if (ver != null && rest.isNotEmpty() && versionOf(pkg) == ver) {
+                failedCompile[pkg] = rest.substringBefore('#')
+                rest.substringAfter('#', "").takeIf { it.isNotEmpty() }?.let { compileDetail[pkg] = it }
+            }
         }
     }
 
@@ -630,10 +646,12 @@ class Hone(private val context: Context) {
         if (android.os.Build.VERSION.SDK_INT >= 28) pi.longVersionCode else @Suppress("DEPRECATION") pi.versionCode.toLong()
     }.getOrNull()
 
-    private fun rememberCantCompile(pkg: String, why: String) {
+    private fun rememberCantCompile(pkg: String, why: String, detail: String) {
         failedCompile[pkg] = why.ifEmpty { "other" }
-        val entries = failedCompile.mapNotNull { (p, w) -> versionOf(p)?.let { "$p@$it#$w" } }.toSet()
-        prefs.edit().putStringSet("cantCompile", entries).apply()
+        if (detail.isNotEmpty()) compileDetail[pkg] = detail else compileDetail.remove(pkg)
+        val entries = failedCompile.filterValues { it != "other" }
+            .mapNotNull { (p, w) -> versionOf(p)?.let { "$p@$it#$w#${compileDetail[p].orEmpty()}" } }.toSet()
+        prefs.edit().putStringSet("cantCompile2", entries).remove("cantCompile").apply()
     }
 
     fun isDebuggable(pkg: String): Boolean = debugCache.getOrPut(pkg) { isDebuggableUncached(pkg) }
@@ -645,7 +663,7 @@ class Hone(private val context: Context) {
     /** Full compile of one app; on success the counts and list update at once, without a 15-second rescan. */
     suspend fun compile(pkg: String): Changed {
         val r = call<Compiled>("compile", "speed", pkg).results.firstOrNull() ?: Changed(false, "no answer")
-        if (!r.ok) rememberCantCompile(pkg, r.why)
+        if (!r.ok) rememberCantCompile(pkg, r.why, r.detail)
         val d = dexopt
         if (r.ok && d != null) {
             val old = d.status[pkg]
