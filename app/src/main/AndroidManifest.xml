@@ -55,6 +55,11 @@
             android:name=".NightJob"
             android:exported="false"
             android:permission="android.permission.BIND_JOB_SERVICE" />
+        <!-- New-app network alerts, every 15 minutes while on. -->
+        <service
+            android:name=".NetWatchJob"
+            android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
         <service
             android:name=".FreeMemoryTile"
             android:exported="true"
