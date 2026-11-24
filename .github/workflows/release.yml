@@ -1,0 +1,64 @@
+name: Release
+
+# Every push to main builds, signs and publishes a GitHub release with the next patch version.
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['**.md']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency: release
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+
+      - name: Next version
+        id: v
+        run: |
+          last=$(git tag --list 'v*' --sort=-v:refname | head -n1)
+          last=${last:-v0.1.0}
+          IFS=. read -r major minor patch <<< "${last#v}"
+          echo "name=$major.$minor.$((patch+1))" >> "$GITHUB_OUTPUT"
+          echo "code=$(( $(git rev-list --count HEAD) ))" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 17 }
+      - uses: android-actions/setup-android@v3
+      - name: NDK and cargo-ndk
+        run: |
+          sdkmanager "ndk;27.2.12479018"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+          rustup target add aarch64-linux-android
+          cargo install cargo-ndk
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Engine tests
+        run: cd engine && cargo test
+
+      - name: Signing key
+        run: |
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/hone.jks"
+          echo "HONE_KEYSTORE=$RUNNER_TEMP/hone.jks" >> "$GITHUB_ENV"
+        
+      - name: Build
+        env:
+          HONE_KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          HONE_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          HONE_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon :app:assembleRelease -PversionName=${{ steps.v.outputs.name }} -PversionCode=${{ steps.v.outputs.code }}
+          cp app/build/outputs/apk/release/app-release.apk Hone-${{ steps.v.outputs.name }}.apk
+
+      - name: Release
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          gh release create "v${{ steps.v.outputs.name }}" "Hone-${{ steps.v.outputs.name }}.apk" \
+            --title "Hone ${{ steps.v.outputs.name }}" --generate-notes --target "$GITHUB_SHA"
