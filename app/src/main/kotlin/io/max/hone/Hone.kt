@@ -492,7 +492,7 @@ class Hone(private val context: Context) {
         paths.chunked(8).forEachIndexed { i, batch ->
             val part = call<Trashed>("trash", *batch.toTypedArray())
             r = Trashed(r.moved + part.moved, r.bytes + part.bytes, r.gone + part.gone, r.errors + part.errors)
-            progress((i + 1) * 8f / paths.size)
+            progress(((i + 1) * 8f / paths.size).coerceAtMost(1f))
         }
         val done = paths.toSet()
         similar = similar?.let { g ->
